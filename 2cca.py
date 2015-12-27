@@ -14,66 +14,78 @@ import sys
 from OpenSSL import crypto
 
 class config:
+    # Algorithms are RSA-2048 and SHA-256. Change below if needed.
     key_size=2048
-
-def ask(what):
-    return raw_input(what+': ')
+    hash_algo='sha256'
+    serialnum_size=8 # Certificate serial number size in bytes
+    # Defaults for some certificate fields
+    country='ZZ' # ZZ is no valid country
+    organization='Home'
+    root_name='Root CA'
+    root_ou='Root'
+    server_ou='Server'
+    client_ou='Client'
+    duration=10*365*24*60*60 # in days
 
 def set_country(cert):
-    print 'Which country is it located in? (default: ZZ)'
+    print 'Which country is it located in? (default: %s)' % config.country
     print 'Provide a 2-letter country code like US, FR, UK'
-    val = ask('Country')
+    val = raw_input('Country: ')
     if len(val)<1:
-        val = 'ZZ'
+        val = config.country
     cert.get_subject().C  = val
 
 def set_city(cert):
     print 'Which city is it located in? (optional)'
-    val = ask('City')
+    val = raw_input('City: ')
     if len(val)>0:
         cert.get_subject().L  = val
 
 def set_org(cert):
-    print 'What organization is it part of? (default: Home)'
-    val = ask('Organization')
+    print 'What organization is it part of? (default: %s)' % config.organization
+    val = raw_input('Organization: ')
     if len(val)<1:
-        val = 'Home'
+        val = config.organization
     cert.get_subject().O  = val
+
+def set_duration(cert):
+    print 'Specify a certificate duration in days (default: %d)' % config.duration
+    val = raw_input('Duration: ')
+    if len(val)<1:
+        duration=config.duration
+    else:
+        duration=int(val)*24*60*60
+    cert.gmtime_adj_notAfter(duration)
+
 
 def build_root():
     # Create certificate template and fill it up
     cert = crypto.X509()
 
-    print 'Give a name to your new root authority (default: Root CA)'
-    val = ask('Name')
+    print 'Give a name to your new root (default: [%s])' % config.root_name
+    val = raw_input('Name: ')
     if len(val)<1:
-        val = 'Root CA'
+        val = config.root_name
     cert.get_subject().CN = val
 
     set_country(cert)
     set_city(cert)
     set_org(cert)
 
-    cert.get_subject().OU = "Root"
+    cert.get_subject().OU = config.root_ou
 
     # Generate key pair
     print '--- generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
-    # Generate random 64-bit serial
-    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(8)]), 16)
+    # Generate random serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(config.serialnum_size)]), 16)
     cert.set_serial_number(serial)
 
-    # Set certificate dates from now to +10y
+    # Set certificate validity dates
     cert.gmtime_adj_notBefore(0)
-    print 'Specify a certificate duration in days (default: 3650)'
-    val = ask('Duration')
-    if len(val)<1:
-        duration=10*365*24*60*60
-    else:
-        duration=int(val)*24*60*60
-    cert.gmtime_adj_notAfter(duration)
+    set_duration(cert)
 
     # Issuer is self
     cert.set_issuer(cert.get_subject())
@@ -87,6 +99,7 @@ def build_root():
     crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert)
     ]
     cert.add_extensions(ext)
+    # Add key identifier in a second pass otherwise openssl barfs
     ext = [
     crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always', issuer=cert)
     ]
@@ -94,7 +107,7 @@ def build_root():
 
     # Sign certificate
     print '--- self-signing certificate'
-    cert.sign(k, 'sha256')
+    cert.sign(k, config.hash_algo)
 
     # Save results to root.crt/root.key
     print '--- saving results to root.crt and root.key'
@@ -127,7 +140,7 @@ def build_server():
     cert = crypto.X509()
 
     print 'Give a name to your new server (default: openvpn-server)'
-    server_name = ask('Name')
+    server_name = raw_input('Name: ')
     if len(server_name)<1:
         server_name = 'openvpn-server'
     cert.get_subject().CN = server_name
@@ -136,26 +149,20 @@ def build_server():
     set_city(cert)
 
     cert.get_subject().O  = root_cert.get_subject().O
-    cert.get_subject().OU = "Server"
+    cert.get_subject().OU = config.server_ou
 
     # Generate new key pair
     print '--- generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
-    # Generate random 64-bit serial
-    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(16)]), 16)
+    # Generate random serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(config.serialnum_size)]), 16)
     cert.set_serial_number(serial)
 
-    # Set certificate dates from now to +10y
+    # Set certificate validity dates
     cert.gmtime_adj_notBefore(0)
-    print 'Specify a certificate duration in days (default: 3650)'
-    val = ask('Duration')
-    if len(val)<1:
-        duration=10*365*24*60*60
-    else:
-        duration=int(val)*24*60*60
-    cert.gmtime_adj_notAfter(duration)
+    set_duration(cert)
 
     # Set issuer to root
     cert.set_issuer(root_cert.get_subject())
@@ -166,7 +173,7 @@ def build_server():
     ext = [
     crypto.X509Extension('basicConstraints', False, 'CA:FALSE'),
     crypto.X509Extension('nsCertType', False, 'server'),
-    crypto.X509Extension('nsComment', False, 'Generated by 2BCA'),
+    crypto.X509Extension('nsComment', False, 'Generated by 2CCA'),
     crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert),
     crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always,issuer:always', issuer=root_cert),
     crypto.X509Extension('extendedKeyUsage', False, 'serverAuth'),
@@ -176,7 +183,7 @@ def build_server():
 
     # Sign with root key
     print '--- signing certificate with root'
-    cert.sign(root_key, 'sha256')
+    cert.sign(root_key, config.hash_algo)
 
     # Dump results to file
     print '--- saving results to %s.crt and %s.key' % (server_name, server_name)
@@ -194,7 +201,7 @@ def build_client():
     cert = crypto.X509()
 
     print 'Give a name to your new client (default: openvpn-client)'
-    client_name = ask('Name')
+    client_name = raw_input('Name: ')
     if len(client_name)<1:
         client_name = 'openvpn-client'
     cert.get_subject().CN = client_name
@@ -202,26 +209,20 @@ def build_client():
     set_country(cert)
     set_city(cert)
     cert.get_subject().O  = root_cert.get_subject().O
-    cert.get_subject().OU = "Client"
+    cert.get_subject().OU = config.client_ou
 
     # Generate new key pair
     print '--- generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
-    # Generate random 64-bit serial
-    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(16)]), 16)
+    # Generate random serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(config.serialnum_size)]), 16)
     cert.set_serial_number(serial)
 
-    # Set certificate dates from now to +10y
+    # Set certificate validity dates
     cert.gmtime_adj_notBefore(0)
-    print 'Specify a certificate duration in days (default: 3650)'
-    val = ask('Duration')
-    if len(val)<1:
-        duration=10*365*24*60*60
-    else:
-        duration=int(val)*24*60*60
-    cert.gmtime_adj_notAfter(duration)
+    set_duration(cert)
 
     # Set issuer to root
     cert.set_issuer(root_cert.get_subject())
@@ -231,7 +232,7 @@ def build_client():
     cert.set_version(2)
     ext = [
     crypto.X509Extension('basicConstraints', False, 'CA:FALSE'),
-    crypto.X509Extension('nsComment', False, 'Generated by 2BCA'),
+    crypto.X509Extension('nsComment', False, 'Generated by 2CCA'),
     crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert),
     crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always,issuer:always', issuer=root_cert),
     crypto.X509Extension('extendedKeyUsage', False, 'clientAuth'),
@@ -241,7 +242,7 @@ def build_client():
 
     # Sign with root key
     print '--- signing certificate with root'
-    cert.sign(root_key, 'sha256')
+    cert.sign(root_key, config.hash_algo)
 
     # Dump results to file
     print '--- saving results to %s.crt and %s.key' % (client_name, client_name)
