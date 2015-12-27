@@ -1,0 +1,273 @@
+# -*- coding: utf-8 -*-
+# 2CCA: The two-cent Certification Authority
+#
+# This script provides the same functionality as OpenVPN EasyRSA
+# It is meant to be a bit more straightforward to use. There are
+# three usable options:
+# - Create root (CA)
+# - Create server certificate, signed by root
+# - Create client certificate, signed by root
+# Files are all saved in the current directory.
+#
+import os
+import sys
+from OpenSSL import crypto
+
+class config:
+    key_size=2048
+
+def ask(what):
+    return raw_input(what+': ')
+
+def set_country(cert):
+    print 'Which country is it located in? (default: ZZ)'
+    print 'Provide a 2-letter country code like US, FR, UK'
+    val = ask('Country')
+    if len(val)<1:
+        val = 'ZZ'
+    cert.get_subject().C  = val
+
+def set_city(cert):
+    print 'Which city is it located in? (optional)'
+    val = ask('City')
+    if len(val)>0:
+        cert.get_subject().L  = val
+
+def set_org(cert):
+    print 'What organization is it part of? (default: Home)'
+    val = ask('Organization')
+    if len(val)<1:
+        val = 'Home'
+    cert.get_subject().O  = val
+
+def build_root():
+    # Create certificate template and fill it up
+    cert = crypto.X509()
+
+    print 'Give a name to your new root authority (default: Root CA)'
+    val = ask('Name')
+    if len(val)<1:
+        val = 'Root CA'
+    cert.get_subject().CN = val
+
+    set_country(cert)
+    set_city(cert)
+    set_org(cert)
+
+    cert.get_subject().OU = "Root"
+
+    # Generate key pair
+    print '--- generating key pair (%d bits)' % config.key_size
+    k = crypto.PKey()
+    k.generate_key(crypto.TYPE_RSA, config.key_size)
+
+    # Generate random 64-bit serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(8)]), 16)
+    cert.set_serial_number(serial)
+
+    # Set certificate dates from now to +10y
+    cert.gmtime_adj_notBefore(0)
+    print 'Specify a certificate duration in days (default: 3650)'
+    val = ask('Duration')
+    if len(val)<1:
+        duration=10*365*24*60*60
+    else:
+        duration=int(val)*24*60*60
+    cert.gmtime_adj_notAfter(duration)
+
+    # Issuer is self
+    cert.set_issuer(cert.get_subject())
+    cert.set_pubkey(k)
+
+    # CA extensions
+    cert.set_version(2)
+    ext = [
+    crypto.X509Extension('basicConstraints', True, 'CA:TRUE'),
+    crypto.X509Extension('keyUsage', True, 'keyCertSign, cRLSign'),
+    crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert)
+    ]
+    cert.add_extensions(ext)
+    ext = [
+    crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always', issuer=cert)
+    ]
+    cert.add_extensions(ext)
+
+    # Sign certificate
+    print '--- self-signing certificate'
+    cert.sign(k, 'sha256')
+
+    # Save results to root.crt/root.key
+    print '--- saving results to root.crt and root.key'
+    open('root.crt', 'w').write(
+        crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    open('root.key', 'w').write(
+        crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+    print 'done'
+
+def load_root():
+    # Read back root certificate and key from root.crt/root.key
+    try:
+        pem = open('root.crt', 'rt').read()
+        root_cert = crypto.load_certificate(crypto.FILETYPE_PEM, pem)
+        pem = open('root.key', 'rt').read()
+        root_key  = crypto.load_privatekey(crypto.FILETYPE_PEM, pem)
+    except IOError:
+        print 'cannot find root key or certificate'
+        print 'generate a root first'
+        raise SystemExit
+
+    return root_cert, root_key
+
+def build_server():
+    # Load root key and cert
+    print '--- loading root certificate and key'
+    root_cert, root_key = load_root()
+
+    # Create certificate template for server and fill it up
+    cert = crypto.X509()
+
+    print 'Give a name to your new server (default: openvpn-server)'
+    server_name = ask('Name')
+    if len(server_name)<1:
+        server_name = 'openvpn-server'
+    cert.get_subject().CN = server_name
+
+    set_country(cert)
+    set_city(cert)
+
+    cert.get_subject().O  = root_cert.get_subject().O
+    cert.get_subject().OU = "Server"
+
+    # Generate new key pair
+    print '--- generating key pair (%d bits)' % config.key_size
+    k = crypto.PKey()
+    k.generate_key(crypto.TYPE_RSA, config.key_size)
+
+    # Generate random 64-bit serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(16)]), 16)
+    cert.set_serial_number(serial)
+
+    # Set certificate dates from now to +10y
+    cert.gmtime_adj_notBefore(0)
+    print 'Specify a certificate duration in days (default: 3650)'
+    val = ask('Duration')
+    if len(val)<1:
+        duration=10*365*24*60*60
+    else:
+        duration=int(val)*24*60*60
+    cert.gmtime_adj_notAfter(duration)
+
+    # Set issuer to root
+    cert.set_issuer(root_cert.get_subject())
+    cert.set_pubkey(k)
+
+    # Set server extensions
+    cert.set_version(2)
+    ext = [
+    crypto.X509Extension('basicConstraints', False, 'CA:FALSE'),
+    crypto.X509Extension('nsCertType', False, 'server'),
+    crypto.X509Extension('nsComment', False, 'Generated by 2BCA'),
+    crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert),
+    crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always,issuer:always', issuer=root_cert),
+    crypto.X509Extension('extendedKeyUsage', False, 'serverAuth'),
+    crypto.X509Extension('keyUsage', False, 'digitalSignature, keyEncipherment')
+    ]
+    cert.add_extensions(ext)
+
+    # Sign with root key
+    print '--- signing certificate with root'
+    cert.sign(root_key, 'sha256')
+
+    # Dump results to file
+    print '--- saving results to %s.crt and %s.key' % (server_name, server_name)
+    open(server_name+'.crt', 'w').write(
+        crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    open(server_name+'.key', 'w').write(
+        crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+
+def build_client():
+    # Load root key and cert
+    print '--- loading root certificate and key'
+    root_cert, root_key = load_root()
+
+    # Create certificate template for client and fill it up
+    cert = crypto.X509()
+
+    print 'Give a name to your new client (default: openvpn-client)'
+    client_name = ask('Name')
+    if len(client_name)<1:
+        client_name = 'openvpn-client'
+    cert.get_subject().CN = client_name
+
+    set_country(cert)
+    set_city(cert)
+    cert.get_subject().O  = root_cert.get_subject().O
+    cert.get_subject().OU = "Client"
+
+    # Generate new key pair
+    print '--- generating key pair (%d bits)' % config.key_size
+    k = crypto.PKey()
+    k.generate_key(crypto.TYPE_RSA, config.key_size)
+
+    # Generate random 64-bit serial
+    serial = int(''.join(['%02x' % ord(x) for x in os.urandom(16)]), 16)
+    cert.set_serial_number(serial)
+
+    # Set certificate dates from now to +10y
+    cert.gmtime_adj_notBefore(0)
+    print 'Specify a certificate duration in days (default: 3650)'
+    val = ask('Duration')
+    if len(val)<1:
+        duration=10*365*24*60*60
+    else:
+        duration=int(val)*24*60*60
+    cert.gmtime_adj_notAfter(duration)
+
+    # Set issuer to root
+    cert.set_issuer(root_cert.get_subject())
+    cert.set_pubkey(k)
+
+    # Set client extensions
+    cert.set_version(2)
+    ext = [
+    crypto.X509Extension('basicConstraints', False, 'CA:FALSE'),
+    crypto.X509Extension('nsComment', False, 'Generated by 2BCA'),
+    crypto.X509Extension('subjectKeyIdentifier', False, 'hash', subject=cert),
+    crypto.X509Extension('authorityKeyIdentifier', False, 'keyid:always,issuer:always', issuer=root_cert),
+    crypto.X509Extension('extendedKeyUsage', False, 'clientAuth'),
+    crypto.X509Extension('keyUsage', False, 'digitalSignature')
+    ]
+    cert.add_extensions(ext)
+
+    # Sign with root key
+    print '--- signing certificate with root'
+    cert.sign(root_key, 'sha256')
+
+    # Dump results to file
+    print '--- saving results to %s.crt and %s.key' % (client_name, client_name)
+    open(client_name+'.crt', 'w').write(
+        crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    open(client_name+'.key', 'w').write(
+        crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+
+
+if __name__=="__main__":
+     
+    if len(sys.argv)<2:
+        print '''
+    Use:
+
+    2cca root               # Create a new Root CA
+    2cca server             # Create a server identity
+    2cca client             # Create a client identity
+
+'''
+        raise SystemExit
+
+    if sys.argv[1]=='root':
+        build_root()
+    elif sys.argv[1].endswith('server'):
+        build_server()
+    elif sys.argv[1].endswith('client'):
+        build_client()
+
