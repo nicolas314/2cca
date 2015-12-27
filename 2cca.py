@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # 2CCA: The two-cent Certification Authority
+# This source hereby placed in the public domain (2015 December)
 #
 # This script provides the same functionality as OpenVPN EasyRSA
 # It is meant to be a bit more straightforward to use. There are
