@@ -14,11 +14,13 @@ Usage:
 - View/update Certificate Revocation List (CRL)
 
 You need to create a root first, which will be saved in the current
-directory as ca.crt and ca.key.
+directory as ca.crt and ca.key. Do not lose the CA key!
 
-You can then create as many server and client identities as you need.
-Answer the questions when you get them. Identities are saved according to
-the name you provided, as .crt and .key.
+You can then create server and client identities as you need.
+Identities are saved according to the name you provided, as:
+- name.crt
+- name.key
+- name.p12 for clients. This is useful for some Android OpenVPN clients.
 
 A CRL can be interactively generated or updated if it already exists.
 

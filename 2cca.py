@@ -28,7 +28,7 @@ class config:
     root_ou='Root'
     server_ou='Server'
     client_ou='Client'
-    duration=10*365*24*60*60 # in days
+    duration=10*365 # in days
     # Default base file name for root files
     root='ca'
 
@@ -57,13 +57,17 @@ def set_duration(cert):
     print 'Specify a certificate duration in days (default: %d)' % config.duration
     val = raw_input('Duration: ')
     if len(val)<1:
-        duration=config.duration
+        duration=config.duration*24*60*60
     else:
         duration=int(val)*24*60*60
     cert.gmtime_adj_notAfter(duration)
 
 
 def build_root():
+    if os.path.exists(config.root+'.crt') and os.path.exists(config.root+'.key'):
+        print 'A root already exists in this directory. Exiting now'
+        raise SystemExit
+
     # Create certificate template and fill it up
     cert = crypto.X509()
 
@@ -80,7 +84,7 @@ def build_root():
     cert.get_subject().OU = config.root_ou
 
     # Generate key pair
-    print '--- generating key pair (%d bits)' % config.key_size
+    print 'Generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
@@ -111,11 +115,10 @@ def build_root():
     cert.add_extensions(ext)
 
     # Sign certificate
-    print '--- self-signing certificate'
     cert.sign(k, config.hash_algo)
 
     # Save root crt and key
-    print '--- saving results to %s.crt and %s.key' % (config.root, config.root)
+    print 'Saving results to %s.crt and %s.key' % (config.root, config.root)
     open(config.root+'.crt', 'w').write(
         crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
     open(config.root+'.key', 'w').write(
@@ -130,8 +133,7 @@ def load_root():
         pem = open(config.root+'.key', 'rt').read()
         root_key  = crypto.load_privatekey(crypto.FILETYPE_PEM, pem)
     except IOError:
-        print 'cannot find root key or certificate'
-        print 'generate a root first'
+        print 'Cannot find root key or certificate. Generate a root first'
         raise SystemExit
 
     return root_cert, root_key
@@ -146,7 +148,6 @@ def load_crl():
 
 def build_server():
     # Load root key and cert
-    print '--- loading root certificate and key'
     root_cert, root_key = load_root()
 
     # Create certificate template for server and fill it up
@@ -165,7 +166,7 @@ def build_server():
     cert.get_subject().OU = config.server_ou
 
     # Generate new key pair
-    print '--- generating key pair (%d bits)' % config.key_size
+    print 'Generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
@@ -195,19 +196,18 @@ def build_server():
     cert.add_extensions(ext)
 
     # Sign with root key
-    print '--- signing certificate with root'
     cert.sign(root_key, config.hash_algo)
 
     # Dump results to file
-    print '--- saving results to %s.crt and %s.key' % (server_name, server_name)
+    print 'Saving results to %s.crt and %s.key' % (server_name, server_name)
     open(server_name+'.crt', 'w').write(
         crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
     open(server_name+'.key', 'w').write(
         crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+    print 'done'
 
 def build_client():
     # Load root key and cert
-    print '--- loading root certificate and key'
     root_cert, root_key = load_root()
 
     # Create certificate template for client and fill it up
@@ -225,7 +225,7 @@ def build_client():
     cert.get_subject().OU = config.client_ou
 
     # Generate new key pair
-    print '--- generating key pair (%d bits)' % config.key_size
+    print 'Generating key pair (%d bits)' % config.key_size
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, config.key_size)
 
@@ -254,15 +254,22 @@ def build_client():
     cert.add_extensions(ext)
 
     # Sign with root key
-    print '--- signing certificate with root'
     cert.sign(root_key, config.hash_algo)
 
     # Dump results to file
-    print '--- saving results to %s.crt and %s.key' % (client_name, client_name)
+    print 'Saving results to: %s.[crt|key|p12]' % (client_name,)
     open(client_name+'.crt', 'w').write(
         crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
     open(client_name+'.key', 'w').write(
         crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+    # Create a password-less p12, useful for some Android clients
+    p12 = crypto.PKCS12()
+    p12.set_ca_certificates([root_cert])
+    p12.set_privatekey(k)
+    p12.set_certificate(cert)
+    pem=p12.export()
+    open(client_name+'.p12', 'w').write(pem)
+    print 'done'
 
 def nice_date(d):
     return '%s-%s-%s' % (d[:4], d[4:6], d[6:8])
@@ -278,9 +285,10 @@ def update_crl():
     # Load CRL if one is found in current directory
     root_crl = load_crl()
     if root_crl:
-        print '--- found %s.crl' % (config.root,)
+        print 'Found %s.crl' % (config.root,)
         # Identify revoked certs
-        print '--- revoked serial numbers:'
+        print
+        print 'Revoked serial numbers:'
         print 'serial'
         for rev in root_crl.get_revoked():
             print rev.get_serial().lower()
@@ -288,7 +296,8 @@ def update_crl():
         root_crl=crypto.CRL()
 
     # List certificates in current directory
-    print '--- certificates in current directory:'
+    print
+    print 'Certificates in current directory:'
     known_certs=glob.glob('*.crt')
     # Remove root cert from list, cannot revoke itself
     known_certs.remove(config.root+'.crt')
@@ -310,7 +319,8 @@ def update_crl():
                                nice_date(cert.get_notBefore()),
                                nice_date(cert.get_notAfter()))
     while 1:
-        req = raw_input('certificate to revoke by name (empty to exit): ')
+        print
+        req = raw_input('Certificate to revoke by name (return to exit): ')
         if len(req)<1:
             return
         if not req in name2serial.keys():
