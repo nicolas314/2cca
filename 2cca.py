@@ -12,6 +12,8 @@
 #
 import os
 import sys
+import glob
+import time
 from OpenSSL import crypto
 
 class config:
@@ -27,6 +29,8 @@ class config:
     server_ou='Server'
     client_ou='Client'
     duration=10*365*24*60*60 # in days
+    # Default base file name for root files
+    root='ca'
 
 def set_country(cert):
     print 'Which country is it located in? (default: %s)' % config.country
@@ -110,20 +114,20 @@ def build_root():
     print '--- self-signing certificate'
     cert.sign(k, config.hash_algo)
 
-    # Save results to root.crt/root.key
-    print '--- saving results to root.crt and root.key'
-    open('root.crt', 'w').write(
+    # Save root crt and key
+    print '--- saving results to %s.crt and %s.key' % (config.root, config.root)
+    open(config.root+'.crt', 'w').write(
         crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-    open('root.key', 'w').write(
+    open(config.root+'.key', 'w').write(
         crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
     print 'done'
 
 def load_root():
-    # Read back root certificate and key from root.crt/root.key
+    # Read back root certificate and key
     try:
-        pem = open('root.crt', 'rt').read()
+        pem = open(config.root+'.crt', 'rt').read()
         root_cert = crypto.load_certificate(crypto.FILETYPE_PEM, pem)
-        pem = open('root.key', 'rt').read()
+        pem = open(config.root+'.key', 'rt').read()
         root_key  = crypto.load_privatekey(crypto.FILETYPE_PEM, pem)
     except IOError:
         print 'cannot find root key or certificate'
@@ -131,6 +135,14 @@ def load_root():
         raise SystemExit
 
     return root_cert, root_key
+
+def load_crl():
+    try:
+        pem = open(config.root+'.crl', 'rt').read()
+        root_crl = crypto.load_crl(crypto.FILETYPE_PEM, pem)
+    except IOError:
+        root_crl = None
+    return root_crl
 
 def build_server():
     # Load root key and cert
@@ -252,6 +264,74 @@ def build_client():
     open(client_name+'.key', 'w').write(
         crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
 
+def nice_date(d):
+    return '%s-%s-%s' % (d[:4], d[4:6], d[6:8])
+
+def now():
+    n=time.gmtime()
+    return '%4d%02d%02d%02d%02d%02dZ' % (n[0], n[1], n[2], n[3], n[4], n[5])
+
+def update_crl():
+    # Load root key and cert
+    root_cert, root_key = load_root()
+
+    # Load CRL if one is found in current directory
+    root_crl = load_crl()
+    if root_crl:
+        print '--- found %s.crl' % (config.root,)
+        # Identify revoked certs
+        print '--- revoked serial numbers:'
+        print 'serial'
+        for rev in root_crl.get_revoked():
+            print rev.get_serial().lower()
+    else:
+        root_crl=crypto.CRL()
+
+    # List certificates in current directory
+    print '--- certificates in current directory:'
+    known_certs=glob.glob('*.crt')
+    # Remove root cert from list, cannot revoke itself
+    known_certs.remove(config.root+'.crt')
+    if len(known_certs)<1:
+        print 'none found'
+        return
+
+    name2serial={}
+    print '%-16s %-20s %-15s %-15s' % ('serial', 'name', 'from', 'to')
+    for certname in known_certs:
+        f=open(certname, 'rt')
+        pem=f.read()
+        f.close()
+        cert = crypto.load_certificate(crypto.FILETYPE_PEM, pem)
+        serial=hex(cert.get_serial_number())[2:-1]
+        name2serial[certname[:-4]]=serial
+        print '%-16s %-20s %-15s %-15s' % (serial,
+                               certname[:-4],
+                               nice_date(cert.get_notBefore()),
+                               nice_date(cert.get_notAfter()))
+    while 1:
+        req = raw_input('certificate to revoke by name (empty to exit): ')
+        if len(req)<1:
+            return
+        if not req in name2serial.keys():
+            print 'cannot find:', req
+        else:
+            break
+            
+    rev = crypto.Revoked()
+    rev.set_serial(name2serial[req])
+    rev.set_reason('unspecified')
+    rev.set_rev_date(now())
+
+    # Update CRL
+    root_crl.add_revoked(rev)
+    # Sign CRL
+    crl_text = root_crl.export(root_cert, root_key, crypto.FILETYPE_PEM, days=365)
+    # Publish CRL
+    f=open(config.root+'.crl', 'w')
+    f.write(crl_text)
+    f.close()
+    return
 
 if __name__=="__main__":
      
@@ -263,13 +343,18 @@ if __name__=="__main__":
     2cca server             # Create a server identity
     2cca client             # Create a client identity
 
+    2cca crl                # Revoke certificates
+
 '''
         raise SystemExit
 
     if sys.argv[1]=='root':
         build_root()
-    elif sys.argv[1].endswith('server'):
+    elif sys.argv[1]=='server':
         build_server()
-    elif sys.argv[1].endswith('client'):
+    elif sys.argv[1]=='client':
         build_client()
+    elif sys.argv[1]=='crl':
+        update_crl()
+
 
