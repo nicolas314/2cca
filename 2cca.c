@@ -1,12 +1,9 @@
 /*
  * Two-cent Certification Authority: the C version
  * This utility is meant to replace easy-rsa in openvpn distributions.
- * It makes it easier to generate a root CA, and then generate server or
- * client certificates.
- * It can also generate Certificate Revocation Lists to be used on the
- * OpenVPN server side.
+ * It makes it easier to generate a root CA, server, or client certs.
  *
- * (c) nicolas314 -- Code hereby placed in the public domain.
+ * (c) nicolas314 -- MIT license
  */
 
 #include <stdio.h>
