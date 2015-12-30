@@ -4,10 +4,6 @@
  * It makes it easier to generate a root CA, server, or client certs.
  *
  * (c) nicolas314 -- MIT license
- *
- * FIXME
- * Still missing:
- * - CRL management
  */
 
 #include <stdio.h>
@@ -209,7 +205,7 @@ int build_server(void)
     X509_NAME * name ;
     FILE * pem ;
     root ca ;
-    char filename[FIELD_SZ+4];
+    char filename[FIELD_SZ+5];
 
     if (load_root(&ca)!=0) {
         fprintf(stderr, "Cannot find root key or certificate. Generate a root first\n");
@@ -294,7 +290,7 @@ int build_client(void)
     X509_NAME * name ;
     FILE * pem ;
     root ca ;
-    char filename[FIELD_SZ+4];
+    char filename[FIELD_SZ+5];
     PKCS12 * p12;
     STACK_OF(X509) * ca_stack ;
 
@@ -387,13 +383,154 @@ int build_client(void)
     printf("done\n");
 }
 
-
-int update_crl(void)
+static X509_CRL * load_crl(void)
 {
-    fprintf(stderr, "not implemented yet\n");
-    return -1 ;
+    FILE * fp ;
+    BIO  * in ;
+    X509_CRL * crl ;
+
+    in = BIO_new(BIO_s_file());
+    if ((fp=fopen(ROOT_BNAME ".crl", "rb"))==NULL) {
+        BIO_free(in);
+        return NULL ;
+    }
+    BIO_set_fp(in, fp, BIO_NOCLOSE);
+    crl = PEM_read_bio_X509_CRL(in, NULL, NULL, NULL);
+    fclose(fp);
+    BIO_free(in);
+    return crl ;
 }
 
+/*
+ * openssl crl -in ca.crl -text
+ */
+void show_crl(void)
+{
+    X509_CRL * crl ;
+    X509_REVOKED * rev ;
+    int i, total ;
+    STACK_OF(X509_REVOKED) * rev_list ;
+    BIO * out ;
+
+    if ((crl = load_crl())==NULL) {
+        printf("No CRL found\n");
+        return ;
+    }
+    rev_list = X509_CRL_get_REVOKED(crl);
+    total = sk_X509_REVOKED_num(rev_list);
+
+    out = BIO_new(BIO_s_file());
+    out = BIO_new_fp(stdout, BIO_NOCLOSE);
+
+    BIO_printf(out, "-- Revoked certificates found in CRL\n");
+    for (i=0 ; i<total ; i++) {
+        rev=sk_X509_REVOKED_value(rev_list, i);
+        BIO_printf(out, "serial: ");
+        i2a_ASN1_INTEGER(out, rev->serialNumber);
+        BIO_printf(out, "\n  date: ");
+        ASN1_TIME_print(out, rev->revocationDate);
+        BIO_printf(out, "\n\n");
+    }
+    X509_CRL_free(crl);
+    BIO_free_all(out);
+    return ;
+}
+
+/*
+ * Revoke one certificate at a time
+ * No check performed to see if certificate already revoked.
+ */
+void revoke_cert(char * name)
+{
+    char filename[FIELD_SZ+5];
+    FILE * f ;
+    X509_CRL * crl ;
+    X509 * cert ;
+    ASN1_INTEGER * r_serial ;
+    ASN1_INTEGER * crlnum ;
+    X509_REVOKED * rev ;
+    ASN1_TIME * tm ;
+    root ca ;
+    BIO * out ;
+    BIGNUM * b_crlnum ;
+
+    /* Find requested certificate by name */
+    sprintf(filename, "%s.crt", name);
+    if ((f=fopen(filename, "r"))==NULL) {
+        fprintf(stderr, "Cannot find: %s\n", filename);
+        return ; 
+    }
+    cert = PEM_read_X509(f, NULL, NULL, NULL);
+    fclose(f);
+    /* Get certificate serial number */
+    r_serial = X509_get_serialNumber(cert);
+    /* Make a revoked object with that serial */
+    rev = X509_REVOKED_new();
+    X509_REVOKED_set_serialNumber(rev, r_serial);
+    X509_free(cert);
+    /* Set reason to unspecified */
+    rev->reason = ASN1_ENUMERATED_get(CRL_REASON_UNSPECIFIED);
+
+    /* Load or create new CRL */
+    if ((crl = load_crl())==NULL) {
+        crl = X509_CRL_new();
+        X509_CRL_set_version(crl, 1);
+        /* Set CRL number */
+        crlnum = ASN1_INTEGER_new();
+        ASN1_INTEGER_set(crlnum, 1);
+        X509_CRL_add1_ext_i2d(crl, NID_crl_number, crlnum, 0, 0);
+        ASN1_INTEGER_free(crlnum);
+    } else {
+        crlnum = X509_CRL_get_ext_d2i(crl, NID_crl_number, 0, 0);
+        b_crlnum = ASN1_INTEGER_to_BN(crlnum, NULL);
+        BN_add_word(b_crlnum, 1);
+        BN_to_ASN1_INTEGER(b_crlnum, crlnum);
+        BN_free(b_crlnum);
+        X509_CRL_add1_ext_i2d(crl, NID_crl_number, crlnum, 0, X509V3_ADD_REPLACE_EXISTING);
+        ASN1_INTEGER_free(crlnum);
+    }
+
+    /* What time is it? */
+    tm = ASN1_TIME_new();
+    X509_gmtime_adj(tm, 0);
+    X509_REVOKED_set_revocationDate(rev, tm);
+    X509_CRL_set_lastUpdate(crl, tm);
+
+    /* Set CRL next update to a year from now */
+    X509_gmtime_adj(tm, 365*24*60*60);
+    X509_CRL_set_nextUpdate(crl, tm);
+    ASN1_TIME_free(tm);
+
+    /* Add revoked to CRL */
+    X509_CRL_add0_revoked(crl, rev);    
+    X509_CRL_sort(crl);
+
+    /* Load root key to sign CRL */
+    if (load_root(&ca)!=0) {
+        fprintf(stderr, "Cannot find root key/crt\n");
+        return ;
+    }
+    X509_CRL_set_issuer_name(crl, X509_get_subject_name(ca.cert));
+    X509_free(ca.cert);
+
+    /* Sign CRL */
+    X509_CRL_sign(crl, ca.key, EVP_sha256());
+    EVP_PKEY_free(ca.key);
+
+    /* Dump CRL */
+    if ((f = fopen("ca.crl", "wb"))==NULL) {
+        fprintf(stderr, "Cannot write ca.crl: aborting\n");
+        X509_CRL_free(crl);
+        return ;
+    }
+    out = BIO_new(BIO_s_file());
+    BIO_set_fp(out, f, BIO_NOCLOSE);
+    PEM_write_bio_X509_CRL(out, crl);
+    BIO_free_all(out);
+    fclose(f);
+    X509_CRL_free(crl);
+    return ;
+}
 
 void usage(void)
 {
@@ -415,7 +552,8 @@ void usage(void)
         "\n"
         "Certificate duration in days\n"
         "\n"
-        "\t2cca crl             # Revoke certificates\n"
+        "\t2cca crl             # Show CRL\n"
+        "\t2cca revoke NAME     # Revoke single cert by name\n"
         "\n"
     );
 }
@@ -484,7 +622,13 @@ int main(int argc, char * argv[])
     } else if (!strcmp(argv[1], "client")) {
         build_client() ;
     } else if (!strcmp(argv[1], "crl")) {
-        update_crl();
+        show_crl();
+    } else if (!strcmp(argv[1], "revoke")) {
+        if (argc>1) {
+            revoke_cert(argv[2]);
+        } else {
+            fprintf(stderr, "Missing certificate name for revoke\n");
+        }
     }
 	return 0 ;
 }

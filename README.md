@@ -39,7 +39,9 @@ Identities are saved according to the name you provided, as:
 - name.key
 - name.p12 for clients. This is useful for some Android OpenVPN clients.
 
-A CRL can be interactively generated or updated if it already exists.
+Primitive CRL management is also offered. 'crl' displays the contents of
+'ca.crl' in the current directory, and 'revoke NAME' allows revocation of a
+single certificate by name.
 
 Examples
 --------
@@ -55,6 +57,16 @@ Create a server:
 Create a client:
 
     2cca client C=IT L=Milano CN=openvpn-client
+
+Display revoked certificates present in ca.crl:
+
+    2cca crl
+
+Revoke certificate named 'myclient' with myclient.crt in directory. Also
+requires the CA private key to sign the CRL.
+
+    2cca revoke myclient
+
 
 -- nicolas314 - 2015-December
 
