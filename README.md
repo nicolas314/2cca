@@ -23,12 +23,12 @@ Usage:
 - View/update Certificate Revocation List (CRL)
 
 Certificate fields can be specified on the command line, knowing that:
-O  will always be included and defaults to "Home"
-C  will always be included and defaults to "ZZ", an invalid 2-letter
+- O  will always be included and defaults to "Home"
+- C  will always be included and defaults to "ZZ", an invalid 2-letter
 country identifier
-CN will always be included and defaults to "root", "server", or "client"
-L, ST, and email are all optional
-a single OU will be added as "Root", "Server", or "Client"
+- CN will always be included and defaults to "root", "server", or "client"
+- L, ST, and email are all optional
+- a single OU will be added as "Root", "Server", or "Client"
 
 You need to create a root first, which will be saved in the current
 directory as ca.crt and ca.key. Do not lose the CA key!
