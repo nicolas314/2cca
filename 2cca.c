@@ -173,9 +173,9 @@ int build_root(void)
 
     /* Root can issue certs and sign CRLS */
     set_extension(cert, cert, NID_basic_constraints, "critical,CA:TRUE");
-    set_extension(cert, cert, NID_subject_key_identifier, "hash");
-    set_extension(cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
     set_extension(cert, cert, NID_key_usage, "critical,keyCertSign,cRLSign");
+    set_extension(cert, cert, NID_subject_key_identifier, "hash");
+    set_extension(cert, cert, NID_authority_key_identifier, "keyid:always");
 
     X509_set_issuer_name(cert, name);
     X509_sign(cert, pkey, EVP_sha256());

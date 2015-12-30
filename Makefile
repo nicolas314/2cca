@@ -1,6 +1,6 @@
 
-#CFLAGS=-O2
-CFLAGS=-g
+CFLAGS=-O2
+#CFLAGS=-g
 LDFLAGS=-lcrypto
 
 all: main
