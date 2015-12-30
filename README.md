@@ -45,12 +45,15 @@ Examples
 --------
 
 Create a root:
+
     2cca root O=ACME C=UK L=Cambridge CN=RootCA email=root@acme
 
 Create a server:
+
     2cca server C=FR L=Paris CN=openvpn-server email=root@acme-paris
 
 Create a client:
+
     2cca client C=IT L=Milano CN=openvpn-client
 
 -- nicolas314 - 2015-December
