@@ -4,6 +4,10 @@
  * It makes it easier to generate a root CA, server, or client certs.
  *
  * (c) nicolas314 -- MIT license
+ *
+ * FIXME
+ * Still missing:
+ * - CRL management
  */
 
 #include <stdio.h>
@@ -195,7 +199,7 @@ int build_root(void)
 }
 
 /*
- * Build a new server certificate for OpenVPN
+ * Build a new server certificate
  */
 int build_server(void)
 {
@@ -280,7 +284,7 @@ int build_server(void)
 }
 
 /*
- * Build a new client certificate for OpenVPN
+ * Build a new client certificate
  */
 int build_client(void)
 {
@@ -291,6 +295,8 @@ int build_client(void)
     FILE * pem ;
     root ca ;
     char filename[FIELD_SZ+4];
+    PKCS12 * p12;
+    STACK_OF(X509) * ca_stack ;
 
     if (load_root(&ca)!=0) {
         fprintf(stderr, "Cannot find root key or certificate. Generate a root first\n");
@@ -310,7 +316,7 @@ int build_client(void)
     rsa = RSA_generate_key(RSA_KEYSZ, RSA_F4, progress, 0);
     EVP_PKEY_assign_RSA(pkey, rsa);
 
-    /* Create certificate bag and fill it up */
+    /* Assign all certificate fields */
     cert = X509_new();
     X509_set_version(cert, 2);
 
@@ -344,7 +350,7 @@ int build_client(void)
 
     X509_sign(cert, ca.key, EVP_sha256());
 
-    printf("Saving results to %s.[crt|key]\n", certinfo.cn);
+    printf("Saving results to %s.[crt|key|p12]\n", certinfo.cn);
     sprintf(filename, "%s.key", certinfo.cn);
     pem = fopen(filename, "wb");
     PEM_write_PrivateKey(pem, pkey, NULL, NULL, 0, NULL, NULL);
@@ -354,6 +360,23 @@ int build_client(void)
     pem = fopen(filename, "wb");
     PEM_write_X509(pem, cert);
     fclose(pem);
+
+    ca_stack = sk_X509_new_null();
+    sk_X509_push(ca_stack, ca.cert);
+    p12 = PKCS12_new() ;
+    p12 = PKCS12_create(NULL,
+                        certinfo.cn,
+                        pkey,
+                        cert,
+                        ca_stack,
+                        0, 0, 0, 0, 0);
+    sprintf(filename, "%s.p12", certinfo.cn);
+    pem = fopen(filename, "wb");
+    i2d_PKCS12_fp(pem, p12);
+    fclose(pem);
+    PKCS12_free(p12);
+    sk_X509_free(ca_stack);
+
 
     X509_free(cert);
     EVP_PKEY_free(pkey);
