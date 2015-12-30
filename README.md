@@ -6,14 +6,14 @@ installations for OpenVPN.
 
 Two independent versions are provided here:
 - Python version (2cca.py) based on pyopenssl
-- A C version (in src/) based on OpenSSL
+- A single-file C version based on OpenSSL
 
 The Python version is placed in the Public Domain. It was used as a
 proof-of-concept to demonstrate everything could be done directly with
 OpenSSL without involving the command-line tools. It is completely usable
 to generate root, server, and client certificates.
 
-The C version is MIT-licensed.
+The C version is MIT-licensed. See LICENSE.
 
 Usage:
 
@@ -25,8 +25,10 @@ Usage:
 Certificate fields can be specified on the command line, knowing that:
 - O  will always be included and defaults to "Home"
 - C  will always be included and defaults to "ZZ", an invalid 2-letter
-country identifier
-- CN will always be included and defaults to "root", "server", or "client"
+country identifier that does not invalidate the certificate.
+- CN will always be included and defaults to "root", "server", or "client".
+  For a VPN server you might want to provide something like
+  CN=vpn.example.com
 - L, ST, and email are all optional
 - a single OU will be added as "Root", "Server", or "Client"
 
@@ -52,7 +54,7 @@ Create a root:
 
 Create a server:
 
-    2cca server C=FR L=Paris CN=openvpn-server email=root@acme-paris
+    2cca server C=FR L=Paris CN=vpn.example.com email=root@acme-paris
 
 Create a client:
 
@@ -67,6 +69,16 @@ requires the CA private key to sign the CRL.
 
     2cca revoke myclient
 
+
+There is no database of issued certificates to maintain because they use 64
+or 128-bit serial numbers, thus are already unique without having to
+remember an increasing index.
+
+There is absolutely no key protection whatsoever. You are in charge of
+protecting the .key files as you need. For personal VPNs this is not really
+an issue, but for something in need of security you probably want to import
+keys into smart cards. This is meant to replace easy-rsa, not a
+full-fledged PKI.
 
 -- nicolas314 - 2015-December
 
