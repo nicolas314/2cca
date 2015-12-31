@@ -22,23 +22,32 @@
 #define RSA_KEYSZ   2048
 #define FIELD_SZ    128
 #define SERIAL_SZ   16  /* in bytes */
-#define ROOT_BNAME  "ca"
 
-/* Use to shuffle root key+cert around */
-typedef struct _root_ {
+/* Use to shuffle key+cert around */
+typedef struct _identity_ {
     EVP_PKEY * key ;
     X509    * cert ;
-} root ;
+} identity ;
 
 /* Input value storage */
-static struct {
+typedef struct _certinfo_ {
     char o [FIELD_SZ+1];
+    char ou[FIELD_SZ+1];
     char cn[FIELD_SZ+1];
     char c [FIELD_SZ+1];
     int  duration ;
     char l [FIELD_SZ+1];
     char st[FIELD_SZ+1];
     char email[FIELD_SZ+1] ;
+
+    enum {
+        PROFILE_UNKNOWN=0,
+        PROFILE_ROOT_CA,
+        PROFILE_SUB_CA,
+        PROFILE_SERVER,
+        PROFILE_CLIENT
+    } profile ;
+    char signing_ca[FIELD_SZ+1];
 } certinfo ;
 
 /*
@@ -95,20 +104,24 @@ static void progress(int p, int n, void *arg)
 }
 
 /*
- * Load root certificate and private key from current dir
+ * Load CA certificate and private key from current dir
  */
-static int load_root(root * ca)
+static int load_ca(char * ca_name, identity * ca)
 {
     FILE * f ;
     RSA  * rsa ;
+    char filename[FIELD_SZ+1] ;
 
-    if ((f=fopen(ROOT_BNAME ".crt", "r"))==NULL) {
+    sprintf(filename, "%s.crt", ca_name);
+    if ((f=fopen(filename, "r"))==NULL) {
+        fprintf(stderr, "Cannot find: %s\n", filename);
         return -1 ; 
     }
     ca->cert = PEM_read_X509(f, NULL, NULL, NULL);
     fclose(f);
 
-    if ((f=fopen(ROOT_BNAME ".key", "r"))==NULL) {
+    sprintf(filename, "%s.key", ca_name);
+    if ((f=fopen(filename, "r"))==NULL) {
         return -1 ; 
     }
     rsa = PEM_read_RSAPrivateKey(f, NULL, NULL, NULL);
@@ -125,22 +138,64 @@ static int load_root(root * ca)
 }
 
 /*
- * Build a new root CA, i.e. a self-signed certificate
+ * Create identity
  */
-int build_root(void)
+int build_identity(certinfo * ci)
 {
     EVP_PKEY * pkey ;
     RSA * rsa ;
     X509 * cert ;
     X509_NAME * name ;
+    identity ca ;
+    char filename[FIELD_SZ+5];
     FILE * pem ;
 
     /* Check before overwriting */
-    if ((access(ROOT_BNAME ".crt", F_OK)!=-1) || (access(ROOT_BNAME ".key", F_OK)!=-1)) {
-        fprintf(stderr, "A root already exists in this directory. Exiting now\n");
+    sprintf(filename, "%s.crt", ci->cn);
+    if (access(filename, F_OK)!=-1) {
+        fprintf(stderr, "identity named %s already exists in this directory. Exiting now\n", filename);
+        return -1 ;
+    }
+    sprintf(filename, "%s.key", ci->cn);
+    if (access(filename, F_OK)!=-1) {
+        fprintf(stderr, "identity named %s already exists in this directory. Exiting now\n", filename);
         return -1 ;
     }
 
+    switch (ci->profile) {
+        case PROFILE_ROOT_CA:
+        strcpy(ci->ou, "Root");
+        break;
+
+        case PROFILE_SUB_CA:
+        strcpy(ci->ou, "Sub");
+        break;
+
+        case PROFILE_SERVER:
+        strcpy(ci->ou, "Server");
+        break;
+        
+        case PROFILE_CLIENT:
+        strcpy(ci->ou, "Client");
+        break;
+
+        default:
+        fprintf(stderr, "Unknown profile: aborting\n");
+        return -1 ;
+    }
+
+    if (ci->profile != PROFILE_ROOT_CA) {
+        /* Need to load signing CA */
+        if (load_ca(ci->signing_ca, &ca)!=0) {
+            fprintf(stderr, "Cannot find CA key or certificate\n");
+            return -1 ;
+        }
+        /* Organization is the same as root */
+        X509_NAME_get_text_by_NID(X509_get_subject_name(ca.cert),
+                                  NID_organizationName,
+                                  ci->o,
+                                  FIELD_SZ);
+    }
 
     /* Generate key pair */
     printf("Generating RSA-%d key\n", RSA_KEYSZ);
@@ -153,244 +208,106 @@ int build_root(void)
     X509_set_version(cert, 2);
     set_serial128(cert);
     X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.duration * 24*60*60);
+    X509_gmtime_adj(X509_get_notAfter(cert), ci->duration * 24*60*60);
     X509_set_pubkey(cert, pkey);
 
     name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, certinfo.c, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, certinfo.o, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, certinfo.cn, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, "Root", -1, -1, 0);
-    if (certinfo.l[0]) {
-        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, certinfo.l, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)ci->c, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)ci->o, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)ci->cn, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, (unsigned char*)ci->ou, -1, -1, 0);
+    if (ci->l[0]) {
+        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, (unsigned char *)ci->l, -1, -1, 0);
     }
-    if (certinfo.email[0]) {
-        X509_NAME_add_entry_by_txt(name, "emailAddress", MBSTRING_ASC, certinfo.email, -1, -1, 0);
+    if (ci->email[0]) {
+        X509_NAME_add_entry_by_txt(name, "emailAddress", MBSTRING_ASC, (unsigned char *)ci->email, -1, -1, 0);
     }
-    if (certinfo.st[0]) {
-        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, certinfo.st, -1, -1, 0);
+    if (ci->st[0]) {
+        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, (unsigned char *)ci->st, -1, -1, 0);
     }
 
-    /* Root can issue certs and sign CRLS */
-    set_extension(cert, cert, NID_basic_constraints, "critical,CA:TRUE");
-    set_extension(cert, cert, NID_key_usage, "critical,keyCertSign,cRLSign");
-    set_extension(cert, cert, NID_subject_key_identifier, "hash");
-    set_extension(cert, cert, NID_authority_key_identifier, "keyid:always");
+    /* Set extensions according to profile */
+    switch (ci->profile) {
+        case PROFILE_ROOT_CA:
+        /* CA profiles can issue certs and sign CRLS */
+        set_extension(cert, cert, NID_basic_constraints, "critical,CA:TRUE");
+        set_extension(cert, cert, NID_key_usage, "critical,keyCertSign,cRLSign");
+        set_extension(cert, cert, NID_subject_key_identifier, "hash");
+        set_extension(cert, cert, NID_authority_key_identifier, "keyid:always");
+        break ;
 
-    X509_set_issuer_name(cert, name);
-    X509_sign(cert, pkey, EVP_sha256());
+        case PROFILE_SUB_CA:
+        /* CA profiles can issue certs and sign CRLS */
+        set_extension(ca.cert, cert, NID_basic_constraints, "critical,CA:TRUE");
+        set_extension(ca.cert, cert, NID_key_usage, "critical,keyCertSign,cRLSign");
+        set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
+        set_extension(ca.cert, cert, NID_authority_key_identifier, "keyid:always");
+        break;
 
-    printf("Saving results to %s.[crt|key]\n", ROOT_BNAME);
-    pem = fopen(ROOT_BNAME ".key", "wb");
+        case PROFILE_CLIENT:
+        set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
+        set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
+        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "clientAuth");
+        set_extension(ca.cert, cert, NID_key_usage, "digitalSignature");
+        set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
+        set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
+        break ;
+
+        case PROFILE_SERVER:
+        set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
+        set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
+        set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
+        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "serverAuth");
+        set_extension(ca.cert, cert, NID_key_usage, "digitalSignature,keyEncipherment");
+        set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
+        set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
+        break ;
+
+        case PROFILE_UNKNOWN:
+        default:
+        break ;
+    }
+    /* Set issuer */
+    if (ci->profile==PROFILE_ROOT_CA) {
+        /* Self-signed */
+        X509_set_issuer_name(cert, name);
+        X509_sign(cert, pkey, EVP_sha256());
+    } else {
+        /* Signed by parent CA */
+        X509_set_issuer_name(cert, X509_get_subject_name(ca.cert));
+        X509_sign(cert, ca.key, EVP_sha256());
+    }
+
+    printf("Saving results to %s.[crt|key]\n", ci->cn);
+    pem = fopen(filename, "wb");
     PEM_write_PrivateKey(pem, pkey, NULL, NULL, 0, NULL, NULL);
     fclose(pem);
-    pem = fopen(ROOT_BNAME ".crt", "wb");
+    sprintf(filename, "%s.crt", ci->cn);
+    pem = fopen(filename, "wb");
     PEM_write_X509(pem, cert);
     fclose(pem);
     X509_free(cert);
     EVP_PKEY_free(pkey);
+
+    if (ci->profile!=PROFILE_ROOT_CA) {
+        X509_free(ca.cert);
+        EVP_PKEY_free(ca.key);
+    }
     printf("done\n");
 
     return 0;
 }
 
-/*
- * Build a new server certificate
- */
-int build_server(void)
-{
-    EVP_PKEY * pkey ;
-    RSA * rsa ;
-    X509 * cert ;
-    X509_NAME * name ;
-    FILE * pem ;
-    root ca ;
-    char filename[FIELD_SZ+5];
-
-    if (load_root(&ca)!=0) {
-        fprintf(stderr, "Cannot find root key or certificate. Generate a root first\n");
-        return -1 ;
-    }
-    /* Organization is the same as root */
-    X509_NAME_get_text_by_NID(X509_get_subject_name(ca.cert),
-                              NID_organizationName,
-                              certinfo.o,
-                              FIELD_SZ);
-
-    /* Generate key pair */
-    printf("Generating RSA-%d key\n", RSA_KEYSZ);
-    pkey = EVP_PKEY_new();
-    rsa = RSA_generate_key(RSA_KEYSZ, RSA_F4, progress, 0);
-    EVP_PKEY_assign_RSA(pkey, rsa);
-
-    /* Assign all certificate fields */
-    cert = X509_new();
-    X509_set_version(cert, 2);
-
-    set_serial128(cert);
-    X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.duration * 24*60*60);
-    X509_set_pubkey(cert, pkey);
-
-    name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, certinfo.c, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, certinfo.o, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, "Server", -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, certinfo.cn, -1, -1, 0);
-    if (certinfo.l[0]) {
-        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, certinfo.l, -1, -1, 0);
-    }
-    if (certinfo.email[0]) {
-        X509_NAME_add_entry_by_txt(name, "emailAddress", MBSTRING_ASC, certinfo.email, -1, -1, 0);
-    }
-    if (certinfo.st[0]) {
-        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, certinfo.st, -1, -1, 0);
-    }
-
-    X509_set_issuer_name(cert, X509_get_subject_name(ca.cert));
-    set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
-    set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
-    set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
-    set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
-    set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
-    set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "serverAuth");
-    set_extension(ca.cert, cert, NID_key_usage, "digitalSignature,keyEncipherment");
-
-    X509_sign(cert, ca.key, EVP_sha256());
-
-    printf("Saving results to %s.[crt|key]\n", certinfo.cn);
-    sprintf(filename, "%s.key", certinfo.cn);
-    pem = fopen(filename, "wb");
-    PEM_write_PrivateKey(pem, pkey, NULL, NULL, 0, NULL, NULL);
-    fclose(pem);
-
-    sprintf(filename, "%s.crt", certinfo.cn);
-    pem = fopen(filename, "wb");
-    PEM_write_X509(pem, cert);
-    fclose(pem);
-
-    X509_free(cert);
-    EVP_PKEY_free(pkey);
-
-    X509_free(ca.cert);
-    EVP_PKEY_free(ca.key);
-
-    printf("done\n");
-
-}
-
-/*
- * Build a new client certificate
- */
-int build_client(void)
-{
-    EVP_PKEY * pkey ;
-    RSA * rsa ;
-    X509 * cert ;
-    X509_NAME * name ;
-    FILE * pem ;
-    root ca ;
-    char filename[FIELD_SZ+5];
-    PKCS12 * p12;
-    STACK_OF(X509) * ca_stack ;
-
-    if (load_root(&ca)!=0) {
-        fprintf(stderr, "Cannot find root key or certificate. Generate a root first\n");
-        return -1 ;
-    }
-    /*
-     * Organization is the same as root
-     */
-    X509_NAME_get_text_by_NID(X509_get_subject_name(ca.cert),
-                              NID_organizationName,
-                              certinfo.o,
-                              FIELD_SZ);
-
-    /* Generate key pair */
-    printf("Generating RSA-%d key\n", RSA_KEYSZ);
-    pkey = EVP_PKEY_new();
-    rsa = RSA_generate_key(RSA_KEYSZ, RSA_F4, progress, 0);
-    EVP_PKEY_assign_RSA(pkey, rsa);
-
-    /* Assign all certificate fields */
-    cert = X509_new();
-    X509_set_version(cert, 2);
-
-    set_serial128(cert);
-    X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.duration * 24*60*60);
-    X509_set_pubkey(cert, pkey);
-
-    name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, certinfo.c, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, certinfo.o, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, "Client", -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, certinfo.cn, -1, -1, 0);
-    if (certinfo.l[0]) {
-        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, certinfo.l, -1, -1, 0);
-    }
-    if (certinfo.email[0]) {
-        X509_NAME_add_entry_by_txt(name, "emailAddress", MBSTRING_ASC, certinfo.email, -1, -1, 0);
-    }
-    if (certinfo.st[0]) {
-        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, certinfo.st, -1, -1, 0);
-    }
-
-    X509_set_issuer_name(cert, X509_get_subject_name(ca.cert));
-    set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
-    set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
-    set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
-    set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
-    set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "clientAuth");
-    set_extension(ca.cert, cert, NID_key_usage, "digitalSignature");
-
-    X509_sign(cert, ca.key, EVP_sha256());
-
-    printf("Saving results to %s.[crt|key|p12]\n", certinfo.cn);
-    sprintf(filename, "%s.key", certinfo.cn);
-    pem = fopen(filename, "wb");
-    PEM_write_PrivateKey(pem, pkey, NULL, NULL, 0, NULL, NULL);
-    fclose(pem);
-
-    sprintf(filename, "%s.crt", certinfo.cn);
-    pem = fopen(filename, "wb");
-    PEM_write_X509(pem, cert);
-    fclose(pem);
-
-    ca_stack = sk_X509_new_null();
-    sk_X509_push(ca_stack, ca.cert);
-    p12 = PKCS12_new() ;
-    p12 = PKCS12_create(NULL,
-                        certinfo.cn,
-                        pkey,
-                        cert,
-                        ca_stack,
-                        0, 0, 0, 0, 0);
-    sprintf(filename, "%s.p12", certinfo.cn);
-    pem = fopen(filename, "wb");
-    i2d_PKCS12_fp(pem, p12);
-    fclose(pem);
-    PKCS12_free(p12);
-    sk_X509_free(ca_stack);
-
-
-    X509_free(cert);
-    EVP_PKEY_free(pkey);
-
-    X509_free(ca.cert);
-    EVP_PKEY_free(ca.key);
-
-    printf("done\n");
-}
-
-static X509_CRL * load_crl(void)
+static X509_CRL * load_crl(char * ca_name)
 {
     FILE * fp ;
     BIO  * in ;
     X509_CRL * crl ;
+    char filename[FIELD_SZ+5];
 
+    sprintf(filename, "%s.crl", ca_name);
     in = BIO_new(BIO_s_file());
-    if ((fp=fopen(ROOT_BNAME ".crl", "rb"))==NULL) {
+    if ((fp=fopen(filename, "rb"))==NULL) {
         BIO_free(in);
         return NULL ;
     }
@@ -404,7 +321,7 @@ static X509_CRL * load_crl(void)
 /*
  * openssl crl -in ca.crl -text
  */
-void show_crl(void)
+void show_crl(char * ca_name)
 {
     X509_CRL * crl ;
     X509_REVOKED * rev ;
@@ -412,7 +329,7 @@ void show_crl(void)
     STACK_OF(X509_REVOKED) * rev_list ;
     BIO * out ;
 
-    if ((crl = load_crl())==NULL) {
+    if ((crl = load_crl(ca_name))==NULL) {
         printf("No CRL found\n");
         return ;
     }
@@ -440,7 +357,7 @@ void show_crl(void)
  * Revoke one certificate at a time
  * No check performed to see if certificate already revoked.
  */
-void revoke_cert(char * name)
+void revoke_cert(char * ca_name, char * name)
 {
     char filename[FIELD_SZ+5];
     FILE * f ;
@@ -450,7 +367,7 @@ void revoke_cert(char * name)
     ASN1_INTEGER * crlnum ;
     X509_REVOKED * rev ;
     ASN1_TIME * tm ;
-    root ca ;
+    identity ca ;
     BIO * out ;
     BIGNUM * b_crlnum ;
 
@@ -464,6 +381,9 @@ void revoke_cert(char * name)
     fclose(f);
     /* Get certificate serial number */
     r_serial = X509_get_serialNumber(cert);
+
+    /* Find out if if was already revoked */
+
     /* Make a revoked object with that serial */
     rev = X509_REVOKED_new();
     X509_REVOKED_set_serialNumber(rev, r_serial);
@@ -472,7 +392,7 @@ void revoke_cert(char * name)
     rev->reason = ASN1_ENUMERATED_get(CRL_REASON_UNSPECIFIED);
 
     /* Load or create new CRL */
-    if ((crl = load_crl())==NULL) {
+    if ((crl = load_crl(ca_name))==NULL) {
         crl = X509_CRL_new();
         X509_CRL_set_version(crl, 1);
         /* Set CRL number */
@@ -506,8 +426,8 @@ void revoke_cert(char * name)
     X509_CRL_sort(crl);
 
     /* Load root key to sign CRL */
-    if (load_root(&ca)!=0) {
-        fprintf(stderr, "Cannot find root key/crt\n");
+    if (load_ca(ca_name, &ca)!=0) {
+        fprintf(stderr, "Cannot find CA key/crt\n");
         return ;
     }
     X509_CRL_set_issuer_name(crl, X509_get_subject_name(ca.cert));
@@ -537,9 +457,10 @@ void usage(void)
     printf(
         "\n"
         "\tUse:\n"
-        "\t2cca root   [DN] [duration=xx] # Create a root\n"
-        "\t2cca server [DN] [duration=xx] # Create a server\n"
-        "\t2cca client [DN] [duration=xx] # Create a client\n"
+        "\t2cca root   [DN] [duration=xx]         # Create a root CA\n"
+        "\t2cca sub    [DN] [duration=xx] [ca=xx] # Create a sub CA\n"
+        "\t2cca server [DN] [duration=xx] [ca=xx] # Create a server\n"
+        "\t2cca client [DN] [duration=xx] [ca=xx] # Create a client\n"
         "\n"
         "Where DN is given as key=val pairs. Supported fields:\n"
         "\n"
@@ -550,15 +471,16 @@ void usage(void)
         "\tL     a locality or city name (optional)\n"
         "\temail an email address\n"
         "\n"
-        "Certificate duration in days\n"
+        "\tCertificate duration in days\n"
+        "\tSigning CA is specified with ca=CN (default: root)\n"
         "\n"
-        "\t2cca crl             # Show CRL\n"
-        "\t2cca revoke NAME     # Revoke single cert by name\n"
+        "\t2cca crl [ca=xx]            # Show CRL for CA xx\n"
+        "\t2cca revoke NAME [ca=xx]    # Revoke single cert by name\n"
         "\n"
     );
 }
 
-int parse_cmd_line(int argc, char ** argv)
+int parse_cmd_line(int argc, char ** argv, certinfo *ci)
 {
     int i ;
     char key[FIELD_SZ] ;
@@ -567,19 +489,21 @@ int parse_cmd_line(int argc, char ** argv)
     for (i=2 ; i<argc ; i++) { 
         if (sscanf(argv[i], "%[^=]=%s", key, val)==2) {
             if (!strcmp(key, "O")) {
-                strcpy(certinfo.o, val);
+                strcpy(ci->o, val);
             } else if (!strcmp(key, "C")) {
-                strcpy(certinfo.c, val);
+                strcpy(ci->c, val);
             } else if (!strcmp(key, "ST")) {
-                strcpy(certinfo.st, val);
+                strcpy(ci->st, val);
             } else if (!strcmp(key, "CN")) {
-                strcpy(certinfo.cn, val);
+                strcpy(ci->cn, val);
             } else if (!strcmp(key, "L")) {
-                strcpy(certinfo.l, val);
+                strcpy(ci->l, val);
             } else if (!strcmp(key, "email")) {
-                strcpy(certinfo.email, val);
+                strcpy(ci->email, val);
             } else if (!strcmp(key, "duration")) {
-                certinfo.duration = atoi(val);
+                ci->duration = atoi(val);
+            } else if (!strcmp(key, "ca")) {
+                strcpy(ci->signing_ca, val);
             } else {
                 fprintf(stderr, "Unsupported field: [%s]\n", key);
                 return -1 ;
@@ -591,6 +515,8 @@ int parse_cmd_line(int argc, char ** argv)
 
 int main(int argc, char * argv[])
 {
+    certinfo ci ;
+
 	if (argc<2) {
         usage();
 		return 1 ;
@@ -599,35 +525,39 @@ int main(int argc, char * argv[])
     OpenSSL_add_all_algorithms();
 
     /* Initialize DN fields to default values */
-    strcpy(certinfo.o, "Home");
-    strcpy(certinfo.c, "ZZ");
-    certinfo.duration = 3650 ;
-    certinfo.l[0]=0 ;
-    certinfo.cn[0]=0 ;
-    certinfo.st[0]=0 ;
-    certinfo.email[0]=0 ;
+    memset(&ci, 0, sizeof(certinfo));
+    strcpy(ci.o, "Home");
+    strcpy(ci.c, "ZZ");
+    ci.duration = 3650 ;
+    strcpy(ci.signing_ca, "root");
 
-    if ((argc>2) && (parse_cmd_line(argc, argv)!=0)) {
+    if ((argc>2) && (parse_cmd_line(argc, argv, &ci)!=0)) {
         return -1 ;
     }
 
-    if (certinfo.cn[0]==0) {
-        strcpy(certinfo.cn, argv[1]);
+    if (ci.cn[0]==0) {
+        strcpy(ci.cn, argv[1]);
     }
 
     if (!strcmp(argv[1], "root")) {
-        build_root();
+        ci.profile = PROFILE_ROOT_CA ;
+        build_identity(&ci);
+    } else if (!strcmp(argv[1], "sub")) {
+        ci.profile = PROFILE_SUB_CA ;
+        build_identity(&ci);
     } else if (!strcmp(argv[1], "server")) {
-        build_server() ;
+        ci.profile = PROFILE_SERVER ;
+        build_identity(&ci) ;
     } else if (!strcmp(argv[1], "client")) {
-        build_client() ;
+        ci.profile = PROFILE_CLIENT ;
+        build_identity(&ci) ;
     } else if (!strcmp(argv[1], "crl")) {
-        show_crl();
+        show_crl(ci.signing_ca);
     } else if (!strcmp(argv[1], "revoke")) {
         if (argc>1) {
-            revoke_cert(argv[2]);
+            revoke_cert(ci.signing_ca, argv[2]);
         } else {
-            fprintf(stderr, "Missing certificate name for revoke\n");
+            fprintf(stderr, "Missing certificate name for revocation\n");
         }
     }
 	return 0 ;
