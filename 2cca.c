@@ -441,8 +441,9 @@ void revoke_cert(char * ca_name, char * name)
     EVP_PKEY_free(ca.key);
 
     /* Dump CRL */
-    if ((f = fopen("ca.crl", "wb"))==NULL) {
-        fprintf(stderr, "Cannot write ca.crl: aborting\n");
+    sprintf(filename, "%s.crl", ca_name);
+    if ((f = fopen(filename, "wb"))==NULL) {
+        fprintf(stderr, "Cannot write %s: aborting\n", filename);
         X509_CRL_free(crl);
         return ;
     }
