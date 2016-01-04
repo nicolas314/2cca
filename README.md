@@ -27,38 +27,47 @@ Certificate fields can be specified on the command line, knowing that:
 - O  will always be included and defaults to "Home"
 - C  will always be included and defaults to "ZZ", an invalid 2-letter
 country identifier that does not invalidate the certificate.
-- CN will always be included and defaults to "root", "server", or "client".
+- CN will always be included and defaults to "root", "sub", "server", or "client".
   For a VPN server you might want to provide something like
   CN=vpn.example.com
-- L, ST, and email are all optional
+- L, ST, and email are all optional. email can only be specified for client
+  or server certificates and will be added as a SubjectAltName.
 - a single OU will be added as "Root", "Server", or "Client"
 
-You need to create a root first, which will be saved in the current
-directory as ca.crt and ca.key. Do not lose the CA key!
+Create a root first, saved in the current directory as crt/key files.
+Do not lose the CA key!
 
-You can create subordinate CAs if you want. Use '2cca sub' to do so, and
-indicate who is the signing CA by name using ca=NAME.
+Optionally, create subordinate CAs. Use '2cca sub' to do so, and indicate
+who is the signing CA by name using ca=NAME.
 
-You can then create server and client identities as you need.
+Create server and client identities.
 Identities are saved according to the name you provided, as:
 - name.crt
 - name.key
 - name.p12 for clients. This is useful for some Android OpenVPN clients.
 
-If you only have a root, it is always the signing CA. If you change the
-root name or want to use another sub-CA for signature, use ca=NAME.
+The default signing CA is 'root'. If you change the root name or want to
+use another CA for signature, use ca=NAME, where NAME is the CN for the CA
+you want to use. Example:
+
+    2cca sub ca=root CN=ClientCA    # Generate a subCA for clients
+    2cca client ca=ClientCA         # Generate a client with this subCA
 
 Primitive CRL management is also offered. 'crl' displays the contents of
 'ca.crl' in the current directory, and 'revoke NAME' allows revocation of a
 single certificate by name.
+
+You can also generate Diffie-Hellmann parameters. This is useful for
+OpenVPN setups.
+
 
 Examples
 --------
 
 Create a root called RootCA and a subordinate signed by RootCA:
 
-    2cca root O=ACME C=UK L=Cambridge CN=RootCA email=root@acme
-    2cca sub C=UK CN=SubCA email=root@acme ca=RootCA
+    2cca root O=ACME C=UK L=Cambridge CN=RootCA
+    2cca sub C=UK CN=SubCA ca=RootCA
 
 Create a server identity and sign it with SubCA::
 
@@ -88,5 +97,5 @@ an issue, but for something in need of security you probably want to import
 keys into smart cards. This is meant to replace easy-rsa, not a
 full-fledged PKI.
 
--- nicolas314 - 2015-December
+-- nicolas314 - 2016-January
 
