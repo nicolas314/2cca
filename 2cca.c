@@ -29,8 +29,8 @@ typedef struct _identity_ {
     X509    * cert ;
 } identity ;
 
-/* Input value storage */
-typedef struct _certinfo_ {
+/* Config variables */
+struct _certinfo_ {
     char o [FIELD_SZ+1];
     char ou[FIELD_SZ+1];
     char cn[FIELD_SZ+1];
@@ -81,6 +81,9 @@ static int set_serial128(X509 * cert)
     urandom = fopen("/dev/urandom", "rb");
     fread(c_serial, SERIAL_SZ, 1, urandom);
     fclose(urandom);
+
+    c_serial[0]=0x2c ;
+    c_serial[1]=0xca ;
 
     b_serial = BN_bin2bn(c_serial, SERIAL_SZ, NULL);
     BN_to_ASN1_INTEGER(b_serial, X509_get_serialNumber(cert));
@@ -140,7 +143,7 @@ static int load_ca(char * ca_name, identity * ca)
 /*
  * Create identity
  */
-int build_identity(certinfo * ci)
+int build_identity(void)
 {
     EVP_PKEY * pkey ;
     RSA * rsa ;
@@ -151,32 +154,32 @@ int build_identity(certinfo * ci)
     FILE * pem ;
 
     /* Check before overwriting */
-    sprintf(filename, "%s.crt", ci->cn);
+    sprintf(filename, "%s.crt", certinfo.cn);
     if (access(filename, F_OK)!=-1) {
         fprintf(stderr, "identity named %s already exists in this directory. Exiting now\n", filename);
         return -1 ;
     }
-    sprintf(filename, "%s.key", ci->cn);
+    sprintf(filename, "%s.key", certinfo.cn);
     if (access(filename, F_OK)!=-1) {
         fprintf(stderr, "identity named %s already exists in this directory. Exiting now\n", filename);
         return -1 ;
     }
 
-    switch (ci->profile) {
+    switch (certinfo.profile) {
         case PROFILE_ROOT_CA:
-        strcpy(ci->ou, "Root");
+        strcpy(certinfo.ou, "Root");
         break;
 
         case PROFILE_SUB_CA:
-        strcpy(ci->ou, "Sub");
+        strcpy(certinfo.ou, "Sub");
         break;
 
         case PROFILE_SERVER:
-        strcpy(ci->ou, "Server");
+        strcpy(certinfo.ou, "Server");
         break;
         
         case PROFILE_CLIENT:
-        strcpy(ci->ou, "Client");
+        strcpy(certinfo.ou, "Client");
         break;
 
         default:
@@ -184,16 +187,16 @@ int build_identity(certinfo * ci)
         return -1 ;
     }
 
-    if (ci->profile != PROFILE_ROOT_CA) {
+    if (certinfo.profile != PROFILE_ROOT_CA) {
         /* Need to load signing CA */
-        if (load_ca(ci->signing_ca, &ca)!=0) {
+        if (load_ca(certinfo.signing_ca, &ca)!=0) {
             fprintf(stderr, "Cannot find CA key or certificate\n");
             return -1 ;
         }
         /* Organization is the same as root */
         X509_NAME_get_text_by_NID(X509_get_subject_name(ca.cert),
                                   NID_organizationName,
-                                  ci->o,
+                                  certinfo.o,
                                   FIELD_SZ);
     }
 
@@ -208,23 +211,23 @@ int build_identity(certinfo * ci)
     X509_set_version(cert, 2);
     set_serial128(cert);
     X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), ci->duration * 24*60*60);
+    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.duration * 24*60*60);
     X509_set_pubkey(cert, pkey);
 
     name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)ci->c, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)ci->o, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)ci->cn, -1, -1, 0);
-    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, (unsigned char*)ci->ou, -1, -1, 0);
-    if (ci->l[0]) {
-        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, (unsigned char *)ci->l, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)certinfo.c, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)certinfo.o, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)certinfo.cn, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, (unsigned char*)certinfo.ou, -1, -1, 0);
+    if (certinfo.l[0]) {
+        X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, (unsigned char *)certinfo.l, -1, -1, 0);
     }
-    if (ci->st[0]) {
-        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, (unsigned char *)ci->st, -1, -1, 0);
+    if (certinfo.st[0]) {
+        X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, (unsigned char *)certinfo.st, -1, -1, 0);
     }
 
     /* Set extensions according to profile */
-    switch (ci->profile) {
+    switch (certinfo.profile) {
         case PROFILE_ROOT_CA:
         /* CA profiles can issue certs and sign CRLS */
         set_extension(cert, cert, NID_basic_constraints, "critical,CA:TRUE");
@@ -242,8 +245,8 @@ int build_identity(certinfo * ci)
         break;
 
         case PROFILE_CLIENT:
-        if (ci->email[0]) {
-            set_extension(ca.cert, cert, NID_subject_alt_name, ci->email);
+        if (certinfo.email[0]) {
+            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.email);
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
@@ -254,8 +257,8 @@ int build_identity(certinfo * ci)
         break ;
 
         case PROFILE_SERVER:
-        if (ci->email[0]) {
-            set_extension(ca.cert, cert, NID_subject_alt_name, ci->email);
+        if (certinfo.email[0]) {
+            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.email);
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_netscape_comment, "Generated by 2CCA");
@@ -271,7 +274,7 @@ int build_identity(certinfo * ci)
         break ;
     }
     /* Set issuer */
-    if (ci->profile==PROFILE_ROOT_CA) {
+    if (certinfo.profile==PROFILE_ROOT_CA) {
         /* Self-signed */
         X509_set_issuer_name(cert, name);
         X509_sign(cert, pkey, EVP_sha256());
@@ -281,18 +284,18 @@ int build_identity(certinfo * ci)
         X509_sign(cert, ca.key, EVP_sha256());
     }
 
-    printf("Saving results to %s.[crt|key]\n", ci->cn);
+    printf("Saving results to %s.[crt|key]\n", certinfo.cn);
     pem = fopen(filename, "wb");
     PEM_write_PrivateKey(pem, pkey, NULL, NULL, 0, NULL, NULL);
     fclose(pem);
-    sprintf(filename, "%s.crt", ci->cn);
+    sprintf(filename, "%s.crt", certinfo.cn);
     pem = fopen(filename, "wb");
     PEM_write_X509(pem, cert);
     fclose(pem);
     X509_free(cert);
     EVP_PKEY_free(pkey);
 
-    if (ci->profile!=PROFILE_ROOT_CA) {
+    if (certinfo.profile!=PROFILE_ROOT_CA) {
         X509_free(ca.cert);
         EVP_PKEY_free(ca.key);
     }
@@ -506,7 +509,7 @@ void usage(void)
     );
 }
 
-int parse_cmd_line(int argc, char ** argv, certinfo *ci)
+int parse_cmd_line(int argc, char ** argv)
 {
     int i ;
     char key[FIELD_SZ] ;
@@ -515,21 +518,21 @@ int parse_cmd_line(int argc, char ** argv, certinfo *ci)
     for (i=2 ; i<argc ; i++) { 
         if (sscanf(argv[i], "%[^=]=%s", key, val)==2) {
             if (!strcmp(key, "O")) {
-                strcpy(ci->o, val);
+                strcpy(certinfo.o, val);
             } else if (!strcmp(key, "C")) {
-                strcpy(ci->c, val);
+                strcpy(certinfo.c, val);
             } else if (!strcmp(key, "ST")) {
-                strcpy(ci->st, val);
+                strcpy(certinfo.st, val);
             } else if (!strcmp(key, "CN")) {
-                strcpy(ci->cn, val);
+                strcpy(certinfo.cn, val);
             } else if (!strcmp(key, "L")) {
-                strcpy(ci->l, val);
+                strcpy(certinfo.l, val);
             } else if (!strcmp(key, "email")) {
-                sprintf(ci->email, "email:%s", val);
+                sprintf(certinfo.email, "email:%s", val);
             } else if (!strcmp(key, "duration")) {
-                ci->duration = atoi(val);
+                certinfo.duration = atoi(val);
             } else if (!strcmp(key, "ca")) {
-                strcpy(ci->signing_ca, val);
+                strcpy(certinfo.signing_ca, val);
             } else {
                 fprintf(stderr, "Unsupported field: [%s]\n", key);
                 return -1 ;
@@ -541,8 +544,7 @@ int parse_cmd_line(int argc, char ** argv, certinfo *ci)
 
 int main(int argc, char * argv[])
 {
-    certinfo ci ;
-    int      dh_bits=2048;
+    int dh_bits=2048;
 
 	if (argc<2) {
         usage();
@@ -552,37 +554,37 @@ int main(int argc, char * argv[])
     OpenSSL_add_all_algorithms();
 
     /* Initialize DN fields to default values */
-    memset(&ci, 0, sizeof(certinfo));
-    strcpy(ci.o, "Home");
-    strcpy(ci.c, "ZZ");
-    ci.duration = 3650 ;
-    strcpy(ci.signing_ca, "root");
+    memset(&certinfo, 0, sizeof(certinfo));
+    strcpy(certinfo.o, "Home");
+    strcpy(certinfo.c, "ZZ");
+    certinfo.duration = 3650 ;
+    strcpy(certinfo.signing_ca, "root");
 
-    if ((argc>2) && (parse_cmd_line(argc, argv, &ci)!=0)) {
+    if ((argc>2) && (parse_cmd_line(argc, argv)!=0)) {
         return -1 ;
     }
 
-    if (ci.cn[0]==0) {
-        strcpy(ci.cn, argv[1]);
+    if (certinfo.cn[0]==0) {
+        strcpy(certinfo.cn, argv[1]);
     }
 
     if (!strcmp(argv[1], "root")) {
-        ci.profile = PROFILE_ROOT_CA ;
-        build_identity(&ci);
+        certinfo.profile = PROFILE_ROOT_CA ;
+        build_identity();
     } else if (!strcmp(argv[1], "sub")) {
-        ci.profile = PROFILE_SUB_CA ;
-        build_identity(&ci);
+        certinfo.profile = PROFILE_SUB_CA ;
+        build_identity();
     } else if (!strcmp(argv[1], "server")) {
-        ci.profile = PROFILE_SERVER ;
-        build_identity(&ci) ;
+        certinfo.profile = PROFILE_SERVER ;
+        build_identity() ;
     } else if (!strcmp(argv[1], "client")) {
-        ci.profile = PROFILE_CLIENT ;
-        build_identity(&ci) ;
+        certinfo.profile = PROFILE_CLIENT ;
+        build_identity() ;
     } else if (!strcmp(argv[1], "crl")) {
-        show_crl(ci.signing_ca);
+        show_crl(certinfo.signing_ca);
     } else if (!strcmp(argv[1], "revoke")) {
         if (argc>2) {
-            revoke_cert(ci.signing_ca, argv[2]);
+            revoke_cert(certinfo.signing_ca, argv[2]);
         } else {
             fprintf(stderr, "Missing certificate name for revocation\n");
         }
