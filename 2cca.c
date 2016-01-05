@@ -48,6 +48,7 @@ struct _certinfo_ {
         PROFILE_CLIENT
     } profile ;
     char signing_ca[FIELD_SZ+1];
+    int rsa_keysz ;
 } certinfo ;
 
 /*
@@ -201,9 +202,9 @@ int build_identity(void)
     }
 
     /* Generate key pair */
-    printf("Generating RSA-%d key\n", RSA_KEYSZ);
+    printf("Generating RSA-%d key\n", certinfo.rsa_keysz);
     pkey = EVP_PKEY_new();
-    rsa = RSA_generate_key(RSA_KEYSZ, RSA_F4, progress, 0);
+    rsa = RSA_generate_key(certinfo.rsa_keysz, RSA_F4, progress, 0);
     EVP_PKEY_assign_RSA(pkey, rsa);
 
     /* Assign all certificate fields */
@@ -499,6 +500,7 @@ void usage(void)
         "\temail an email address\n"
         "\n"
         "\tCertificate duration in days\n"
+        "\tKey size can be changed with rsa=xx, e.g. rsa=1024\n"
         "\tSigning CA is specified with ca=CN (default: root)\n"
         "\n"
         "\t2cca crl [ca=xx]            # Show CRL for CA xx\n"
@@ -517,7 +519,15 @@ int parse_cmd_line(int argc, char ** argv)
 
     for (i=2 ; i<argc ; i++) { 
         if (sscanf(argv[i], "%[^=]=%s", key, val)==2) {
-            if (!strcmp(key, "O")) {
+            if (!strcmp(key, "rsa")) {
+                certinfo.rsa_keysz = atoi(val);
+                if (certinfo.rsa_keysz != 512 &&
+                    certinfo.rsa_keysz != 1024 &&
+                    certinfo.rsa_keysz != 2048) {
+                    fprintf(stderr, "Wrong key size: %d\n", certinfo.rsa_keysz);
+                    return -1 ;
+                }
+            } else if (!strcmp(key, "O")) {
                 strcpy(certinfo.o, val);
             } else if (!strcmp(key, "C")) {
                 strcpy(certinfo.c, val);
@@ -555,6 +565,7 @@ int main(int argc, char * argv[])
 
     /* Initialize DN fields to default values */
     memset(&certinfo, 0, sizeof(certinfo));
+    certinfo.rsa_keysz = RSA_KEYSZ ;
     strcpy(certinfo.o, "Home");
     strcpy(certinfo.c, "ZZ");
     certinfo.duration = 3650 ;
