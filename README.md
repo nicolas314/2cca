@@ -53,6 +53,22 @@ you want to use. Example:
     2cca sub ca=root CN=ClientCA    # Generate a subCA for clients
     2cca client ca=ClientCA         # Generate a client with this subCA
 
+Generated keys can be either RSA or elliptic curves.
+Without any indication, 2cca will generate 2048-bit RSA keys. This size can
+be changed with rsa=xx. If you want ECC keys, use ec=CURVE where CURVE is
+supported by your local version of OpenSSL. This can be obtained by
+running:
+
+    openssl ecparam -list_curves
+
+Examples:
+
+    # Generate a 1024-bit RSA key for root
+    2cca root rsa=1024
+
+    # Generate an ECC key with curve prime256v1
+    2cca root ec=prime256v1
+
 Primitive CRL management is also offered. 'crl' displays the contents of
 'ca.crl' in the current directory, and 'revoke NAME' allows revocation of a
 single certificate by name.

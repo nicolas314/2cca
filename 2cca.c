@@ -49,6 +49,7 @@ struct _certinfo_ {
     } profile ;
     char signing_ca[FIELD_SZ+1];
     int rsa_keysz ;
+    char ec_name[FIELD_SZ+1] ;
 } certinfo ;
 
 /*
@@ -148,6 +149,7 @@ int build_identity(void)
 {
     EVP_PKEY * pkey ;
     RSA * rsa ;
+    EC_KEY * ecc ;
     X509 * cert ;
     X509_NAME * name ;
     identity ca ;
@@ -202,10 +204,23 @@ int build_identity(void)
     }
 
     /* Generate key pair */
-    printf("Generating RSA-%d key\n", certinfo.rsa_keysz);
-    pkey = EVP_PKEY_new();
-    rsa = RSA_generate_key(certinfo.rsa_keysz, RSA_F4, progress, 0);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (certinfo.ec_name[0]) {
+        printf("Generating EC key [%s]\n", certinfo.ec_name);
+        ecc = EC_KEY_new_by_curve_name(OBJ_txt2nid(certinfo.ec_name));
+        if (!ecc) {
+            fprintf(stderr, "Unknown curve: [%s]\n", certinfo.ec_name);
+            return -1 ;
+        }
+        EC_KEY_set_asn1_flag(ecc, OPENSSL_EC_NAMED_CURVE);
+        EC_KEY_generate_key(ecc);
+        pkey = EVP_PKEY_new();
+        EVP_PKEY_assign_EC_KEY(pkey, ecc);
+    } else {
+        printf("Generating RSA-%d key\n", certinfo.rsa_keysz);
+        pkey = EVP_PKEY_new();
+        rsa = RSA_generate_key(certinfo.rsa_keysz, RSA_F4, progress, 0);
+        EVP_PKEY_assign_RSA(pkey, rsa);
+    }
 
     /* Assign all certificate fields */
     cert = X509_new();
@@ -500,7 +515,10 @@ void usage(void)
         "\temail an email address\n"
         "\n"
         "\tCertificate duration in days\n"
-        "\tKey size can be changed with rsa=xx, e.g. rsa=1024\n"
+        "\tKey generation:\n"
+        "\tEither RSA with keysize set by rsa=xx\n"
+        "\tOr elliptic-curve with curve name set by ec=xx\n"
+        "\tDefault is RSA-2048, i.e. rsa=2048\n"
         "\tSigning CA is specified with ca=CN (default: root)\n"
         "\n"
         "\t2cca crl [ca=xx]            # Show CRL for CA xx\n"
@@ -527,6 +545,8 @@ int parse_cmd_line(int argc, char ** argv)
                     fprintf(stderr, "Wrong key size: %d\n", certinfo.rsa_keysz);
                     return -1 ;
                 }
+            } else if (!strcmp(key, "ec")) {
+                strcpy(certinfo.ec_name, val);
             } else if (!strcmp(key, "O")) {
                 strcpy(certinfo.o, val);
             } else if (!strcmp(key, "C")) {
