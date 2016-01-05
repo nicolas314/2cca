@@ -191,6 +191,11 @@ int build_identity(void)
         return -1 ;
     }
 
+    if (certinfo.ec_name[0] && certinfo.profile!=PROFILE_CLIENT) {
+        fprintf(stderr, "ECC keys are only supported for clients\n");
+        return -1 ;
+    }
+
     if (certinfo.profile != PROFILE_ROOT_CA) {
         /* Need to load signing CA */
         if (load_ca(certinfo.signing_ca, &ca)!=0) {
