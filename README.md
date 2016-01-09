@@ -15,6 +15,22 @@ to generate root, server, and client certificates.
 
 The C version is MIT-licensed. See LICENSE.
 
+Compilation:
+Type 'make'. You can also compile it with:
+
+    cc -o 2cca 2cca.c -lcrypto
+
+Tested on:
+- ArchLinux on Raspberry Pi -- openssl 1.0.2.e-1
+- Debian on x64 -- openssl 1.0.2.e-1
+
+On OSX you cannot use the system openssl libraries but you can substitue
+them by libressl, available from brew. I got it to compile with:
+
+    cc -I/usr/local/opt/libressl/include -o 2cca 2cca.c -L/usr/local/opt/libressl/lib -lcrypto
+
+Brew says I am using version 2.3.1 of libressl.
+
 Usage:
 
 - Create Root CA
