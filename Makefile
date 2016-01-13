@@ -11,5 +11,5 @@ main: 2cca
 	$(CC) $(CFLAGS) -o $@ $+ $(LDFLAGS)
 
 clean:
-	rm 2cca
+	rm -f 2cca
 

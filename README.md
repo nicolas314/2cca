@@ -27,7 +27,8 @@ Tested on:
 On OSX you cannot use the system openssl libraries but you can substitue
 them by libressl, available from brew. I got it to compile with:
 
-    cc -I/usr/local/opt/libressl/include -o 2cca 2cca.c -L/usr/local/opt/libressl/lib -lcrypto
+    export LIBRE=/usr/local/opt/libressl
+    cc -I$(LIBRE)/include -L$(LIBRE)/lib -o 2cca 2cca.c -lcrypto
 
 Brew says I am using version 2.3.1 of libressl.
 
