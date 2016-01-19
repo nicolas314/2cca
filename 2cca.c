@@ -24,6 +24,9 @@
 #define FIELD_SZ    128
 #define SERIAL_SZ   16  /* in bytes */
 
+#define MAX_SAN     8
+#define BIG_FIELD   (MAX_SAN*(FIELD_SZ+1))
+
 /* Use to shuffle key+cert around */
 typedef struct _identity_ {
     EVP_PKEY * key ;
@@ -39,14 +42,15 @@ struct _certinfo_ {
     int  duration ;
     char l [FIELD_SZ+1];
     char st[FIELD_SZ+1];
-    char email[FIELD_SZ+1] ;
+    char san[FIELD_SZ+1] ;
 
     enum {
         PROFILE_UNKNOWN=0,
         PROFILE_ROOT_CA,
         PROFILE_SUB_CA,
         PROFILE_SERVER,
-        PROFILE_CLIENT
+        PROFILE_CLIENT,
+        PROFILE_WWW,
     } profile ;
     char signing_ca[FIELD_SZ+1];
     int rsa_keysz ;
@@ -186,6 +190,10 @@ int build_identity(void)
         strcpy(certinfo.ou, "Client");
         break;
 
+        case PROFILE_WWW:
+        strcpy(certinfo.ou, "Server");
+        break;
+
         default:
         fprintf(stderr, "Unknown profile: aborting\n");
         return -1 ;
@@ -267,8 +275,8 @@ int build_identity(void)
         break;
 
         case PROFILE_CLIENT:
-        if (certinfo.email[0]) {
-            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.email);
+        if (certinfo.san[0]) {
+            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.san);
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "clientAuth");
@@ -278,8 +286,8 @@ int build_identity(void)
         break ;
 
         case PROFILE_SERVER:
-        if (certinfo.email[0]) {
-            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.email);
+        if (certinfo.san[0]) {
+            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.san);
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
@@ -288,6 +296,18 @@ int build_identity(void)
         set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
         set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
         break ;
+
+        case PROFILE_WWW:
+        if (certinfo.san[0]) {
+            set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.san);
+        }
+        set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
+        set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
+        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "serverAuth,clientAuth");
+        set_extension(ca.cert, cert, NID_key_usage, "digitalSignature,keyEncipherment");
+        set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
+        set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
+        break;
 
         case PROFILE_UNKNOWN:
         default:
@@ -508,6 +528,7 @@ void usage(void)
         "\t2cca sub    [DN] [duration=xx] [ca=xx] # Create a sub CA\n"
         "\t2cca server [DN] [duration=xx] [ca=xx] # Create a server\n"
         "\t2cca client [DN] [duration=xx] [ca=xx] # Create a client\n"
+        "\t2cca www    [DN] [duration=xx] [ca=xx] [dns=x] [dns=x]\n"
         "\n"
         "Where DN is given as key=val pairs. Supported fields:\n"
         "\n"
@@ -518,37 +539,41 @@ void usage(void)
         "\tL     a locality or city name (optional)\n"
         "\temail an email address\n"
         "\n"
-        "\tCertificate duration in days\n"
-        "\tKey generation:\n"
+        "\tduration specifies certificate duration in days\n"
+        "\n"
+        "Key generation:\n"
         "\tEither RSA with keysize set by rsa=xx\n"
         "\tOr elliptic-curve with curve name set by ec=xx\n"
         "\tDefault is RSA-2048, i.e. rsa=2048\n"
         "\tSigning CA is specified with ca=CN (default: root)\n"
         "\n"
+        "CRL management\n"
         "\t2cca crl [ca=xx]            # Show CRL for CA xx\n"
         "\t2cca revoke NAME [ca=xx]    # Revoke single cert by name\n"
         "\n"
         "\t2cca dh [numbits]           # Generate DH parameters\n"
+        "\n"
+        "Web server certificates\n"
+        "\tGenerate web server certificates using 'wwww'\n"
+        "\tSpecify DNS names using dns=x dns=y on the command-line\n"
         "\n"
     );
 }
 
 int parse_cmd_line(int argc, char ** argv)
 {
-    int i ;
-    char key[FIELD_SZ] ;
-    char val[FIELD_SZ] ;
+    char key[FIELD_SZ+1] ;
+    char val[FIELD_SZ+1] ;
+    char tmp[FIELD_SZ+1] ;
+    int  ns=0 ;
+    char san[BIG_FIELD+1];
+    int  i ;
 
+    memset(san, 0, BIG_FIELD+1);
     for (i=2 ; i<argc ; i++) { 
         if (sscanf(argv[i], "%[^=]=%s", key, val)==2) {
             if (!strcmp(key, "rsa")) {
                 certinfo.rsa_keysz = atoi(val);
-                if (certinfo.rsa_keysz != 512 &&
-                    certinfo.rsa_keysz != 1024 &&
-                    certinfo.rsa_keysz != 2048) {
-                    fprintf(stderr, "Wrong key size: %d\n", certinfo.rsa_keysz);
-                    return -1 ;
-                }
             } else if (!strcmp(key, "ec")) {
                 strcpy(certinfo.ec_name, val);
             } else if (!strcmp(key, "O")) {
@@ -562,7 +587,23 @@ int parse_cmd_line(int argc, char ** argv)
             } else if (!strcmp(key, "L")) {
                 strcpy(certinfo.l, val);
             } else if (!strcmp(key, "email")) {
-                sprintf(certinfo.email, "email:%s", val);
+                sprintf(tmp, "email:%s", val);
+                if (ns==0) {
+                    strcpy(san, tmp);
+                } else {
+                    strcat(san, ",\n");
+                    strcat(san, tmp);
+                }
+                ns++;
+            } else if (!strcmp(key, "dns")) {
+                sprintf(tmp, "DNS:%s", val);
+                if (ns==0) {
+                    strcpy(san, tmp);
+                } else {
+                    strcat(san, ",");
+                    strcat(san, tmp);
+                }
+                ns++;
             } else if (!strcmp(key, "duration")) {
                 certinfo.duration = atoi(val);
             } else if (!strcmp(key, "ca")) {
@@ -572,6 +613,10 @@ int parse_cmd_line(int argc, char ** argv)
                 return -1 ;
             }
         }
+    }
+    if (ns>0) {
+        strcpy(certinfo.san, san);
+        printf("SAN[%s]\n", certinfo.san);
     }
     return 0 ;
 }
@@ -614,6 +659,9 @@ int main(int argc, char * argv[])
         build_identity() ;
     } else if (!strcmp(argv[1], "client")) {
         certinfo.profile = PROFILE_CLIENT ;
+        build_identity() ;
+    } else if (!strcmp(argv[1], "www")) {
+        certinfo.profile = PROFILE_WWW ;
         build_identity() ;
     } else if (!strcmp(argv[1], "crl")) {
         show_crl(certinfo.signing_ca);
