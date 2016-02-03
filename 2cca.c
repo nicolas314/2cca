@@ -39,7 +39,7 @@ struct _certinfo_ {
     char ou[FIELD_SZ+1];
     char cn[FIELD_SZ+1];
     char c [FIELD_SZ+1];
-    int  duration ;
+    int  days ;
     char l [FIELD_SZ+1];
     char st[FIELD_SZ+1];
     char san[FIELD_SZ+1] ;
@@ -241,11 +241,13 @@ int build_identity(void)
     X509_set_version(cert, 2);
     set_serial128(cert);
     X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.duration * 24*60*60);
+    X509_gmtime_adj(X509_get_notAfter(cert), certinfo.days * 24*60*60);
     X509_set_pubkey(cert, pkey);
 
     name = X509_get_subject_name(cert);
-    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)certinfo.c, -1, -1, 0);
+    if (certinfo.c[0]) {
+        X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)certinfo.c, -1, -1, 0);
+    }
     X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)certinfo.o, -1, -1, 0);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)certinfo.cn, -1, -1, 0);
     X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_ASC, (unsigned char*)certinfo.ou, -1, -1, 0);
@@ -524,22 +526,22 @@ void usage(void)
     printf(
         "\n"
         "\tUse:\n"
-        "\t2cca root   [DN] [duration=xx]         # Create a root CA\n"
-        "\t2cca sub    [DN] [duration=xx] [ca=xx] # Create a sub CA\n"
-        "\t2cca server [DN] [duration=xx] [ca=xx] # Create a server\n"
-        "\t2cca client [DN] [duration=xx] [ca=xx] # Create a client\n"
-        "\t2cca www    [DN] [duration=xx] [ca=xx] [dns=x] [dns=x]\n"
+        "\t2cca root   [DN] [days=xx]         # Create a root CA\n"
+        "\t2cca sub    [DN] [days=xx] [ca=xx] # Create a sub CA\n"
+        "\t2cca server [DN] [days=xx] [ca=xx] # Create a server\n"
+        "\t2cca client [DN] [days=xx] [ca=xx] # Create a client\n"
+        "\t2cca www    [DN] [days=xx] [ca=xx] [dns=x] [dns=x]\n"
         "\n"
         "Where DN is given as key=val pairs. Supported fields:\n"
         "\n"
         "\tO     Organization, only for root (default: Home)\n"
         "\tCN    Common Name (default: root|server|client\n"
-        "\tC     2-letter country code like US, FR, UK (default: ZZ)\n"
+        "\tC     2-letter country code like US, FR, UK (optional)\n"
         "\tST    a state name (optional)\n"
         "\tL     a locality or city name (optional)\n"
         "\temail an email address\n"
         "\n"
-        "\tduration specifies certificate duration in days\n"
+        "\tdays specifies certificate duration in days\n"
         "\n"
         "Key generation:\n"
         "\tEither RSA with keysize set by rsa=xx\n"
@@ -604,8 +606,8 @@ int parse_cmd_line(int argc, char ** argv)
                     strcat(san, tmp);
                 }
                 ns++;
-            } else if (!strcmp(key, "duration")) {
-                certinfo.duration = atoi(val);
+            } else if (!strcmp(key, "days")) {
+                certinfo.days = atoi(val);
             } else if (!strcmp(key, "ca")) {
                 strcpy(certinfo.signing_ca, val);
             } else {
@@ -636,8 +638,7 @@ int main(int argc, char * argv[])
     memset(&certinfo, 0, sizeof(certinfo));
     certinfo.rsa_keysz = RSA_KEYSZ ;
     strcpy(certinfo.o, "Home");
-    strcpy(certinfo.c, "ZZ");
-    certinfo.duration = 3650 ;
+    certinfo.days = 3650 ;
     strcpy(certinfo.signing_ca, "root");
 
     if ((argc>2) && (parse_cmd_line(argc, argv)!=0)) {

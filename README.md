@@ -70,17 +70,20 @@ specifying a list of key=value blocks. If the value contains blanks,
 surround the whole block with double or simple quotes. Supported keys and
 their meaning are:
 
-    Key      Meaning                 Example                     Default
-    ---      -------                 -------                     -------
-    O        Organisation            "O=ACME Inc"                O=Home
-    C        Country 2-letter code   C=UK                        C=ZZ
-    CN       Common Name             CN=MyServer                 same as TYPE
-    L        Locality or City        L=Munich                    none
-    ST       State                   ST=Bavaria                  none
-    email    Email                   email=root@example.com      none
-    ca       Signing CA              ca=Sub                      ca=root
-    duration Duration                duration=15                 duration=365
-    dns      Host name               dns=www.example.com         none
+    Key      Meaning                 Example                   Default
+    ---      -------                 -------                   -------
+    O        Organisation            "O=ACME Inc"              O=Home or root
+    C        Country 2-letter code   C=UK                      none
+    CN       Common Name             CN=MyServer               same as TYPE
+    L        Locality or City        L=Munich                  none
+    ST       State                   ST=Bavaria                none
+    email    Email                   email=root@example.com    none
+    ca       Signing CA              ca=Sub                    ca=root
+    days     Duration                days=15                   days=365
+    dns      Host name               dns=www.example.com       none
+
+    The O field (Organization) defaults to O=Home for root and is always
+    inherited from the issuer.
 
     The OU field (Organizational Unit) is automatically set by certificate
     type:
@@ -92,6 +95,7 @@ their meaning are:
     server  OU=Server
     client  OU=Client
     www     OU=Server 
+
 
 
 File names
@@ -125,11 +129,11 @@ is the CN for the CA you want to use. Example:
 Certificate Duration
 --------------------
 
-Change certificate duration using duration=xx where xx is in days from
+Change certificate duration using days=xx where xx is in days from
 today. Default certificate duration is 3650 days. Example:
 
     # Generate a client certificate for 15 days:
-    2cca client duration=15 ca=MyROOT
+    2cca client days=15 ca=MyROOT
 
 Crypto Parameters
 -----------------
@@ -204,7 +208,7 @@ Starting from scratch, you want to first create a root (self-signed) CA.
 It will be named 'MyRoot', for a duration of 1000 days, have a 1024-bit RSA
 key, and be based in the UK.
 
-    2cca root CN=MyRoot duration=1000 rsa=1024 C=UK
+    2cca root CN=MyRoot days=1000 rsa=1024 C=UK
 
 Check that you now have MyRoot.crt and MyRoot.key in the current directory.
 
@@ -213,9 +217,9 @@ another one to handle WWW server certificates. Both are children of the
 root you just created.
 
     # Generate the OpenVPN CA named 'VPNCA' for 900 days, 1024-bit RSA:
-    2cca sub CN=VPNCA duration=900 rsa=1024 ca=MyRoot C=UK
+    2cca sub CN=VPNCA days=900 rsa=1024 ca=MyRoot C=UK
     # Generate the www server CA named 'WWWCA' for 500 days, 1024-bit RSA:
-    2cca sub CN=WWWCA duration=500 rsa=1024 ca=MyRoot C=UK
+    2cca sub CN=WWWCA days=500 rsa=1024 ca=MyRoot C=UK
 
 You now have VPNCA.[crt|key] and WWWCA.[crt|key] in the current directory.
 
@@ -224,9 +228,9 @@ appropriate CA. We will use 512-bit RSA keys and set a validity period of
 one year for the server, and two weeks for the client.
 
     # Generate a cert for server named 'vpn-server' for 365 days, 512-bit RSA:
-    2cca server ca=VPNCA duration=365 CN=vpn-server rsa=512 C=UK
+    2cca server ca=VPNCA days=365 CN=vpn-server rsa=512 C=UK
     # Generate a cert for a client named 'joe' for 15 days, 512-bit RSA:
-    2cca client ca=VPNCA duration=15 CN=joe rsa=512 C=UK
+    2cca client ca=VPNCA days=15 CN=joe rsa=512 C=UK
 
 You can now install vpn-server.[crt|key] in the appropriate places and send
 the client credentials to Joe: either send joe.[crt|key] or joe.p12
@@ -235,7 +239,7 @@ Let us issue a web server certificate for a server named 'www.example.com'
 for a duration of one year, with a 2048-bit RSA key:
 
     # Generate a web server certificate
-    2cca www ca=WWWCA duration=365 rsa=2048 CN=www.example.com dns=www.example.com
+    2cca www ca=WWWCA days=365 rsa=2048 CN=www.example.com dns=www.example.com
 
 Check that you have files called
 www.example.com.[crt|key] in the current directory.
