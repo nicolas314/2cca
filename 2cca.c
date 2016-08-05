@@ -15,6 +15,7 @@
 #include <openssl/asn1.h>
 #include <openssl/bn.h>
 #include <openssl/ec.h>
+#include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/pkcs12.h>
 #include <openssl/x509.h>
@@ -67,8 +68,11 @@ static int set_extension(X509 * issuer, X509 * cert, int nid, char * value)
 
     X509V3_set_ctx(&ctx, issuer, cert, NULL, NULL, 0);
     ext = X509V3_EXT_conf_nid(NULL, &ctx, nid, value);
-    if (!ext)
+    if (!ext) {
+        printf("error setting extension\n");
+        ERR_print_errors_fp(stdout);
         return -1;
+    }
 
     X509_add_ext(cert, ext, -1);
     X509_EXTENSION_free(ext);
@@ -281,7 +285,7 @@ int build_identity(void)
             set_extension(ca.cert, cert, NID_subject_alt_name, certinfo.san);
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
-        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "clientAuth");
+        set_extension(ca.cert, cert, NID_ext_key_usage, "clientAuth");
         set_extension(ca.cert, cert, NID_key_usage, "digitalSignature");
         set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
         set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
@@ -293,7 +297,7 @@ int build_identity(void)
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
-        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "serverAuth");
+        set_extension(ca.cert, cert, NID_ext_key_usage, "serverAuth");
         set_extension(ca.cert, cert, NID_key_usage, "digitalSignature,keyEncipherment");
         set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
         set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
@@ -305,7 +309,7 @@ int build_identity(void)
         }
         set_extension(ca.cert, cert, NID_basic_constraints, "CA:FALSE");
         set_extension(ca.cert, cert, NID_netscape_cert_type, "server");
-        set_extension(ca.cert, cert, NID_anyExtendedKeyUsage, "serverAuth,clientAuth");
+        set_extension(ca.cert, cert, NID_ext_key_usage, "serverAuth,clientAuth");
         set_extension(ca.cert, cert, NID_key_usage, "digitalSignature,keyEncipherment");
         set_extension(ca.cert, cert, NID_subject_key_identifier, "hash");
         set_extension(ca.cert, cert, NID_authority_key_identifier, "issuer:always,keyid:always");
@@ -633,6 +637,7 @@ int main(int argc, char * argv[])
 	}
 
     OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
 
     /* Initialize DN fields to default values */
     memset(&certinfo, 0, sizeof(certinfo));
