@@ -102,6 +102,16 @@ Create a client named Marco located in Torino IT:
     -> Generates Marco.crt and Marco.key
 ```
 
+Security (and lack thereof)
+---------------------------
+
+This is not meant to be a PKI, this is meant as a replacement to distribute
+keys to clients who want to connect to an OpenVPN server and easily
+maintain them. The keys are stored unprotected on the local file system.
+
+For some reason, it was easier for me to write this tool than to try and
+understand easy-rsa. Shortest path wins.
+
 
 TODO
 ----
