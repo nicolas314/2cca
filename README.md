@@ -65,6 +65,9 @@ Usage:
 
     2cca www CA=RootCA CN=www.example.com alt=www.example.com alt=example.com
 
+If you want to have spaces inside values, use double quotes around options:
+    2cca root "CN=My Root CA" "O=Bozzos Inc."
+
 ```
 
 2cca generates one identity per request. An identity is made of:

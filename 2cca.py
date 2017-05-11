@@ -129,27 +129,27 @@ def genkey(cfg):
     # Generate key pair
     keycmd=''
     if cfg.get('ecc'):
-        keycmd='openssl ecparam -genkey -name %(ecc)s -out %(cn)s.key' % cfg
+        keycmd='openssl ecparam -genkey -name %(ecc)s -out "%(cn)s.key"' % cfg
     elif cfg.get('rsa'):
-        keycmd='openssl genrsa -out %(cn)s.key %(rsa)s' % cfg
+        keycmd='openssl genrsa -out "%(cn)s.key" %(rsa)s' % cfg
     else:
-        keycmd='openssl genrsa -out %(cn)s.key 2048' % cfg
+        keycmd='openssl genrsa -out "%(cn)s.key" 2048' % cfg
     run(keycmd)
 
 def gencsr(cfg):
-    cmd='openssl req -new -sha256 -key %(cn)s.key -out %(cn)s.csr' % cfg
-    cmd+=' -config %(cn)s.cnf' % cfg
+    cmd='openssl req -new -sha256 -key "%(cn)s.key" -out "%(cn)s.csr"' % cfg
+    cmd+=' -config "%(cn)s.cnf"' % cfg
     cmd+=' -extensions v3'
     run(cmd)
 
 def gencrt(cfg):
     cmd='openssl x509 -req -sha256'
-    cmd+=' -CA %(ca)s.crt -CAkey %(ca)s.key' % cfg
-    cmd+=' -in %(cn)s.csr -out %(cn)s.crt' % cfg
+    cmd+=' -CA "%(ca)s.crt" -CAkey "%(ca)s.key"' % cfg
+    cmd+=' -in "%(cn)s.csr" -out "%(cn)s.crt"' % cfg
     cmd+=' -set_serial %s' % generate_serial()
     if cfg.get('days'):
         cmd+=' -days %(days)s' % cfg
-    cmd+=' -extfile %(cn)s.cnf' % cfg
+    cmd+=' -extfile "%(cn)s.cnf"' % cfg
     cmd+=' -extensions v3'
     run(cmd)
 
@@ -157,11 +157,11 @@ def generate_root(cfg):
     # Generate key pair
     genkey(cfg)
     # Generate self-signed certificate
-    cmd='openssl req -new -x509 -key %(cn)s.key' % cfg
+    cmd='openssl req -new -x509 -key "%(cn)s.key"' % cfg
     cmd+=' -extensions v3'
-    cmd+=' -config %(cn)s.cnf' % cfg
+    cmd+=' -config "%(cn)s.cnf"' % cfg
     cmd+=' -sha256'
-    cmd+=' -out %(cn)s.crt' % cfg
+    cmd+=' -out "%(cn)s.crt"' % cfg
     cmd+=' -set_serial %s' % generate_serial()
     run(cmd)
     #os.remove('%(cn)s.cnf' % cfg)
