@@ -1,22 +1,17 @@
 # 2cca
 2-cent Certification Authority
 
-This program is meant to replace the easy-rsa scripts found in default
-installations for OpenVPN.
-
-Two independent versions are provided here:
-- Python version (2cca.py) without other dependency than access to the
-  'openssl' command.
-- A C version (in src/) based on OpenSSL < 1.1.0
-
+This Python script is meant to replace the easy-rsa scripts found in
+default installations for OpenVPN. For some reason, it was easier for me to
+write this tool than to try and understand easy-rsa. Shortest path wins.
 
 Since OpenSSL decided to wreak havoc by mutating their API starting with
 version 1.1, I decided to stop supporting the C version (May 2017) and will
 continue supporting the Python version instead.
 
-To avoid any dependency on wrapper libraries, the Python version uses the
-openssl command directly, producing temporary configuration files and
-showing what commands are being executed.
+To avoid any dependency on wrapper libraries, this script uses the openssl
+command directly, producing temporary configuration files and showing what
+commands are being executed.
 
 Both versions are MIT-licensed.
 
@@ -112,8 +107,10 @@ This is not meant to be a PKI, this is meant as a replacement to distribute
 keys to clients who want to connect to an OpenVPN server and easily
 maintain them. The keys are stored unprotected on the local file system.
 
-For some reason, it was easier for me to write this tool than to try and
-understand easy-rsa. Shortest path wins.
+openssl commands are executed using 'system' so don't use any untrusted
+user inputs when calling this script. This is meant to be executed by a
+single person on a preferrably air-gapped machine when generating keys for
+groups of people who need VPN access.
 
 
 TODO
