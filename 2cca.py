@@ -112,7 +112,8 @@ subjectAltName=@alt_names
             cfg['ext']+='DNS.%d = %s\n' % (i+1, cfg['alt'][i])
 
     f=open(cfg['cn']+'.cnf', 'w')
-    f.write(cfg['ext'])
+    for line in (cfg['ext']).split('\n'):
+        f.write(line.strip()+'\n')
     f.close()
     return cfg
 
