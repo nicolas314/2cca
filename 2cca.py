@@ -52,7 +52,18 @@ def run(cmd):
     print cmd
     os.system(cmd)
 
+def openssl_ecc_supported():
+    supp = []
+    p = os.popen('openssl ecparam -list_curves', 'r')
+    for line in p.readlines():
+        fields = line.split(':')
+        if len(fields)==2:
+            supp.append(fields[0].strip())
+    p.close()
+    return supp
+
 def get_config(args):
+    ec_supported=None
     cmd=args[0]
     cfg = {'command': cmd}
     for arg in args[1:]:
@@ -66,6 +77,15 @@ def get_config(args):
             if cfg.get('alt')==None:
                 cfg['alt']=list()
             cfg['alt'].append(fields[1])
+        elif fields[0]=='ecc':
+            if not ec_supported:
+                ec_supported = openssl_ecc_supported()
+            if not fields[1] in ec_supported:
+                print 'unsupported curve:', fields[1]
+                print 'supported curves:'
+                print ec_supported
+                raise SystemExit
+            cfg['ecc']=fields[1]
         else:
             cfg[fields[0].lower()]=fields[1]
     # Consistency checks
