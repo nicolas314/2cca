@@ -93,8 +93,10 @@ def get_config(args):
         if cfg.get('cn')==None:
             print 'Specify a common name with cn=NAME'
             raise SystemExit
-        cfg['days']=defaults[cmd]['days']
-        cfg['ou']=defaults[cmd]['ou']
+        if cfg.get('days')==None:
+            cfg['days']=defaults[cmd]['days']
+        if cfg.get('ou')==None:
+            cfg['ou']=defaults[cmd]['ou']
     if cmd in ['sub', 'server', 'client', 'www', 'crl', 'revoke']:
         if cfg.get('ca')==None:
             print 'Specify a CA to use for this operation with ca=NAME'
@@ -184,6 +186,7 @@ def generate_root(cfg):
     cmd+=' -sha256'
     cmd+=' -out "%(cn)s.crt"' % cfg
     cmd+=' -set_serial %s' % generate_serial()
+    cmd+=' -days %(days)s' % cfg
     run(cmd)
     #os.remove('%(cn)s.cnf' % cfg)
 
