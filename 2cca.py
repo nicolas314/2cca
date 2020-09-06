@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
 import sys
+import random
 
 defaults={
     'root': {
@@ -49,7 +51,7 @@ defaults={
 }
 
 def run(cmd):
-    print cmd
+    print(cmd)
     os.system(cmd)
 
 def openssl_ecc_supported():
@@ -81,17 +83,17 @@ def get_config(args):
             if not ec_supported:
                 ec_supported = openssl_ecc_supported()
             if not fields[1] in ec_supported:
-                print 'unsupported curve:', fields[1]
-                print 'supported curves:'
-                print ec_supported
+                print('unsupported curve:', fields[1])
+                print('supported curves:')
+                print(ec_supported)
                 raise SystemExit
             cfg['ecc']=fields[1]
         else:
             cfg[fields[0].lower()]=fields[1]
     # Consistency checks
-    if cmd in defaults.keys():
+    if cmd in list(defaults.keys()):
         if cfg.get('cn')==None:
-            print 'Specify a common name with cn=NAME'
+            print('Specify a common name with cn=NAME')
             raise SystemExit
         if cfg.get('days')==None:
             cfg['days']=defaults[cmd]['days']
@@ -99,7 +101,7 @@ def get_config(args):
             cfg['ou']=defaults[cmd]['ou']
     if cmd in ['sub', 'server', 'client', 'www', 'crl', 'revoke']:
         if cfg.get('ca')==None:
-            print 'Specify a CA to use for this operation with ca=NAME'
+            print('Specify a CA to use for this operation with ca=NAME')
             raise SystemExit
     cfg['ext']='''
         [req]
@@ -121,7 +123,7 @@ def get_config(args):
     # Set extensions according to cert type
     if cfg['command'] in ['root', 'sub', 'server', 'client', 'www']:
         extensions = defaults[cfg['command']]['extensions']
-        for ext in extensions.keys():
+        for ext in list(extensions.keys()):
             cfg['ext']+='%s=%s\n' % (ext, extensions[ext])
 
     # Factorize alt into SAN
@@ -140,13 +142,7 @@ subjectAltName=@alt_names
     return cfg
 
 def generate_serial():
-    f=open('/dev/urandom', 'rb')
-    data=f.read(14)
-    f.close()
-    num='0x2cca'
-    for r in data:
-        num+='%02x' % ord(r)
-    return num
+    return hex(random.randint(0x1000000000, 0xFFFFFFFFFF))
 
 def genkey(cfg):
     # Generate key pair
@@ -202,14 +198,14 @@ def generate_identity(cfg):
     os.remove('%(cn)s.csr' % cfg)
 
 def crl_show(cfg):
-    print cfg
+    print(cfg)
 
 def revoke(cfg):
-    print cfg
+    print(cfg)
 
 if __name__=="__main__":
     if len(sys.argv)==1:
-        print '''
+        print('''
     Available commands:
 
     2cca root       generate root identity
@@ -233,8 +229,10 @@ if __name__=="__main__":
 
     2cca crl        show crl
     2cca revoke
-'''
+''')
         raise SystemExit
+
+    random.seed()
 
     {'root':    generate_root,
      'sub':     generate_identity,
