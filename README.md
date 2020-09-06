@@ -100,6 +100,16 @@ Create a client named Marco located in Torino IT:
     -> Generates Marco.crt and Marco.key
 ```
 
+Create a PKCS#12 (PFX) file:
+```
+    $ read -s CA_P12_PASSWORD  # 1
+    $ export CA_P12_PASSWORD  # 2
+    $ 2cca p12 cn=example.org
+```
+
+Line 1, 2 above is optional, just make sure that the `CA_P12_PASSWORD`
+environment variable has a password set before invoking 2cca.
+
 Security (and lack thereof)
 ---------------------------
 
@@ -118,7 +128,6 @@ TODO
 
 - email is not handled yet
 - Need to add CRL display and revocation
-- Need to add production of P12 files
 - Need to add fancy display of all existing certs and their status
 
 -- nicolas314 - 2017-May

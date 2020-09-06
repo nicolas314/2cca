@@ -3,6 +3,11 @@
 import os
 import sys
 import random
+import re
+from subprocess import Popen, PIPE
+
+DAYS_DEFAULT = 30  # https://man.openbsd.org/openssl.1#days~2
+VERSION_PATTERN = re.compile(r'^((?:Open|Libre)SSL) +([\d\.\w]+)')
 
 defaults = {
     'root': {
@@ -46,9 +51,37 @@ defaults = {
 }
 
 
+def cert_name(cn):
+    return "%s.crt.pem" % cn
+
+
+def key_name(cn):
+    return "%s.key" % cn
+
+
+def csr_name(cn):
+    return "%s.csr" % cn
+
+
+def config_name(cn):
+    return "%s.cnf" % cn
+
+
 def run(cmd):
     print(cmd)
     os.system(cmd)
+
+
+def ssl_version():
+    ver = ""
+    with Popen("openssl version", stdout=PIPE, shell=True) as proc:
+        ver = (proc.stdout.read()).decode()
+
+    m = VERSION_PATTERN.match(ver)
+    if not m:
+        raise RuntimeError(
+            "Unknown OpenSSL version: LibreSSL & OpenSSL supported")
+    return (m[1], m[2])
 
 
 def openssl_ecc_supported():
@@ -159,40 +192,54 @@ def genkey(cfg):
 
 
 def gencsr(cfg):
-    cmd = 'openssl req -new -sha256 -key "%(cn)s.key" -out "%(cn)s.csr"' % cfg
-    cmd += ' -config "%(cn)s.cnf"' % cfg
-    cmd += ' -extensions v3'
-    run(cmd)
+    cn = cfg['cn']
+    cmd = 'openssl req -new -sha256 -key "%(key)s" -out "%(out)s" -config "%(config)s" -extensions v3'
+    run(cmd % {
+        'key': key_name(cn),
+        'out': csr_name(cn),
+        'config': config_name(cn)
+    })
 
 
 def gencrt(cfg):
-    cmd = 'openssl x509 -req -sha256'
-    cmd += ' -CA "%(ca)s.crt" -CAkey "%(ca)s.key"' % cfg
-    cmd += ' -in "%(cn)s.csr" -out "%(cn)s.crt"' % cfg
-    cmd += ' -set_serial %s' % generate_serial()
-    if cfg.get('days'):
-        cmd += ' -days %(days)s' % cfg
-    cmd += ' -extfile "%(cn)s.cnf"' % cfg
-    cmd += ' -extensions v3'
-    run(cmd)
+    cn, ca = (cfg['cn'], cfg['ca'])
+    cmd = ('openssl x509 -req -sha256 -CA "%(ca_cert)s" -CAkey "%(ca_key)s" '
+           '-in "%(in)s" -out "%(out)s" -set_serial %(serial)s -days %(days)s '
+           '-extfile "%(config)s" -extensions v3')
+    run(
+        cmd % {
+            'ca_cert': cert_name(ca),
+            'ca_key': key_name(ca),
+            'in': csr_name(cn),
+            'out': cert_name(cn),
+            'serial': generate_serial(),
+            'config': config_name(cn),
+            'days': cfg.get('days', DAYS_DEFAULT)
+        })
 
 
 def generate_root(cfg):
     # Generate key pair
     genkey(cfg)
     # Generate self-signed certificate
-    cmd = 'openssl req -new -x509 -key "%(cn)s.key"' % cfg
-    cmd += ' -extensions v3'
-    cmd += ' -config "%(cn)s.cnf"' % cfg
-    cmd += ' -sha256'
-    cmd += ' -out "%(cn)s.crt"' % cfg
-    cmd += ' -set_serial %s' % generate_serial()
-    cmd += ' -days %(days)s' % cfg
-    run(cmd)
-    #os.remove('%(cn)s.cnf' % cfg)
+    cn, days = (cfg['cn'], cfg.get('days', DAYS_DEFAULT))
+    cmd = (
+        'openssl req -new -x509 -key "%(key)s" -extensions v3 -sha256 '
+        '-config "%(config)s" -out "%(cert)s" -set_serial %(serial)s -days %(days)s'
+    )
+    run(
+        cmd % {
+            'key': key_name(cn),
+            'config': config_name(cn),
+            'cert': cert_name(cn),
+            'days': days,
+            'serial': generate_serial()
+        })
+    os.remove('%(cn)s.cnf' % cfg)
 
 
 def generate_identity(cfg):
+    cn = cfg['cn']
     # Generate key pair
     genkey(cfg)
     # Generate CSR
@@ -200,8 +247,8 @@ def generate_identity(cfg):
     # Sign CSR with CA
     gencrt(cfg)
     # Delete temporary files
-    os.remove('%(cn)s.cnf' % cfg)
-    os.remove('%(cn)s.csr' % cfg)
+    os.remove(config_name(cn))
+    os.remove(csr_name(cn))
 
 
 def crl_show(cfg):
@@ -212,7 +259,40 @@ def revoke(cfg):
     print(cfg)
 
 
+def p12(cfg):
+    password = os.environ.get('CA_P12_PASSWORD', None)
+    if password is None:
+        raise KeyError(
+            "Password need to be provided as env var CA_P12_PASSWORD")
+    cn, name = (cfg['cn'], cfg.get('name', None))
+
+    # ensure certificate hashes are up to date
+    run("openssl certhash ." if libre_ssl else "c_rehash .")
+
+    # generate p12
+    cmd = ('openssl pkcs12 -export'
+           ' -in %(cert)s'
+           ' -inkey %(key)s'
+           ' -out %(cn)s.p12'
+           ' -chain -CApath .'
+           ' -password pass:"%(password)s"')
+
+    if name:
+        cmd += ' -name "%(name)s"'
+
+    run(
+        cmd % {
+            'cert': cert_name(cn),
+            'key': key_name(cn),
+            'cn': cn,
+            'password': password.replace('"', '\\"'),
+            'name': name
+        })
+
+
 if __name__ == "__main__":
+    global libre_ssl
+
     if len(sys.argv) == 1:
         print('''
     Available commands:
@@ -238,10 +318,20 @@ if __name__ == "__main__":
 
     2cca crl        show crl
     2cca revoke
+
+    2cca p12        export p12
+
+    with params:
+        CN=name     mandatory
+        name=name   optional "friendly name" of the key in the generated file
+
+    with environment variable:
+        CA_P12_PASSWORD - that contains the password for the new P12 file
 ''')
         raise SystemExit
 
     random.seed()
+    libre_ssl = ssl_version()[0] == 'LibreSSL'
 
     {
         'root': generate_root,
@@ -250,5 +340,6 @@ if __name__ == "__main__":
         'client': generate_identity,
         'www': generate_identity,
         'crl': crl_show,
-        'revoke': revoke
+        'revoke': revoke,
+        'p12': p12,
     }[sys.argv[1]](get_config(sys.argv[1:]))
