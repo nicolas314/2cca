@@ -212,6 +212,25 @@ def revoke(cfg):
     print(cfg)
 
 
+def p12(cfg):
+    password = os.environ.get('CA_P12_PASSWORD', None)
+    if password is None:
+        raise KeyError("Password must be provided as environment variable")
+    cmd = ("openssl certhash .")
+    run(cmd)
+
+    args = cfg.copy()
+    args['password'] = password.replace('"', '\\"')
+    cmd = (
+        "openssl pkcs12 -export"
+        " -in %(cn)s.crt"
+        " -inkey %(cn)s.key"
+        " -out %(cn)s.p12"
+        " -chain -CApath ."
+        " -password pass:\"%(password)s\""
+    ) % args
+    run(cmd)
+
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         print('''
@@ -238,6 +257,15 @@ if __name__ == "__main__":
 
     2cca crl        show crl
     2cca revoke
+
+    2cca p12        export p12
+
+    with params:
+        CN=name     mandatory
+        keyname=name optional
+
+    with environment variable:
+        CA_P12_PASSWORD - that contains the password for the new P12 file
 ''')
         raise SystemExit
 
@@ -250,5 +278,6 @@ if __name__ == "__main__":
         'client': generate_identity,
         'www': generate_identity,
         'crl': crl_show,
-        'revoke': revoke
+        'revoke': revoke,
+        'p12': p12,
     }[sys.argv[1]](get_config(sys.argv[1:]))
