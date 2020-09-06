@@ -107,8 +107,8 @@ Create a PKCS#12 (PFX) file:
     $ 2cca p12 cn=example.org
 ```
 
-Line 1, 2 above is optional, just make sure that a password in the
-`CA_P12_PASSWORD` environment variable has a password.
+Line 1, 2 above is optional, just make sure that the `CA_P12_PASSWORD`
+environment variable has a password set before invoking 2cca.
 
 Security (and lack thereof)
 ---------------------------
