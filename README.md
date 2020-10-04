@@ -18,7 +18,7 @@ Both versions are MIT-licensed.
 Usage:
 
 ```
-2cca root 
+2cca root
     Create a root CA
     You need to give it a name with CN=NAME
     You may also want to specify:
@@ -59,6 +59,13 @@ Usage:
     multiple times, like:
 
     2cca www CA=RootCA CN=www.example.com alt=www.example.com alt=example.com
+
+2cca signcsr
+    Sign a Certificate Signing Request, and create a server certificate.
+    Specify the CSR file with CSR=myrequest.csr, provide the CN, and do not
+    forget to specify the signing CA.
+
+    2cca signcsr CA=RootCA CN=www.example.com CSR=www_example_com.csr
 
 If you want to have spaces inside values, use double quotes around options:
     2cca root "CN=My Root CA" "O=Bozzos Inc."
@@ -131,4 +138,3 @@ TODO
 - Need to add fancy display of all existing certs and their status
 
 -- nicolas314 - 2017-May
-
