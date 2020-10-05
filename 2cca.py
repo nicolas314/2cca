@@ -47,6 +47,14 @@ defaults = {
             'keyUsage': 'critical,digitalSignature,keyEncipherment',
             'extendedKeyUsage': 'serverAuth,clientAuth'
         }
+    },
+    'signcsr': {
+        'days': 730,
+        'extensions': {
+            'basicConstraints': 'critical,CA:false',
+            'keyUsage': 'critical,digitalSignature,keyEncipherment',
+            'extendedKeyUsage': 'serverAuth,clientAuth'
+        }
     }
 }
 
@@ -59,7 +67,9 @@ def key_name(cn):
     return "%s.key" % cn
 
 
-def csr_name(cn):
+def csr_name(cn, cfg = None):
+    if cfg and "csr" in cfg:
+        return cfg["csr"]
     return "%s.csr" % cn
 
 
@@ -210,7 +220,7 @@ def gencrt(cfg):
         cmd % {
             'ca_cert': cert_name(ca),
             'ca_key': key_name(ca),
-            'in': csr_name(cn),
+            'in': csr_name(cn, cfg),
             'out': cert_name(cn),
             'serial': generate_serial(),
             'config': config_name(cn),
@@ -250,6 +260,13 @@ def generate_identity(cfg):
     os.remove(config_name(cn))
     os.remove(csr_name(cn))
 
+def sign_csr(cfg):
+    cn = cfg['cn']
+    # Sign CSR with CA
+    gencrt(cfg)
+    # Delete temporary files
+    os.remove(config_name(cn))
+    #os.remove(csr_name(cn))
 
 def crl_show(cfg):
     print(cfg)
@@ -342,4 +359,5 @@ if __name__ == "__main__":
         'crl': crl_show,
         'revoke': revoke,
         'p12': p12,
+        'signcsr': sign_csr,
     }[sys.argv[1]](get_config(sys.argv[1:]))
